@@ -1,0 +1,206 @@
+# mise.toml - Skill update tasks for the mise plugin
+#
+# These tasks help maintain and update the SKILL.md as mise docs evolve.
+# Run: mise run update:skill
+
+[vars]
+skill_path = "skills/mise/SKILL.md"
+usage_spec_ref = "https://usage.jdx.dev/spec/reference/"
+
+[tasks."update:skill"]
+description = "Update SKILL.md by crawling latest mise and usage docs with Claude Code agents"
+usage = '''
+flag "--dry-run" help="Show the prompt without executing"
+flag "--section <section>" help="Update a specific section only (tasks, tools, env, hooks, usage, settings)"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+SKILL_FILE="{{vars.skill_path}}"
+SECTION="${usage_section:-all}"
+
+PROMPT=$(cat <<'PROMPT_EOF'
+You are updating the mise plugin SKILL.md file for Claude Code. Launch parallel research agents to crawl the latest mise documentation, then consolidate findings into the skill file.
+
+## Research Agents to Launch (in parallel)
+
+### Agent 1: Tasks (TOML + File)
+Crawl https://mise.jdx.dev/tasks/toml-tasks.html and https://mise.jdx.dev/tasks/file-tasks.html and https://mise.jdx.dev/tasks/task-configuration.html
+Focus on: all task fields, new features (extends, timeout, structured run/depends), CLI flags, output modes, monorepo tasks, prepare feature.
+Also fetch the task JSON schema from the page to discover any undocumented fields.
+
+### Agent 2: Dev Tools & Backends
+Crawl https://mise.jdx.dev/dev-tools/ and all backend pages linked from there.
+Focus on: all 18 backends with their specific options, per-tool options (version, os, postinstall, install_env), shims, aliases, registry, version formats, CLI commands (mise use, mise install, mise ls, etc).
+
+### Agent 3: Environments & Settings
+Crawl https://mise.jdx.dev/environments/ and https://mise.jdx.dev/configuration/settings.html and https://mise.jdx.dev/configuration.html
+Focus on: env section, special directives (_.path, _.file, _.source), profiles/MISE_ENV, templates/Tera (functions, filters, tests), required/redacted vars, shell expansion, all settings with types/defaults/env vars.
+
+### Agent 4: Hooks, Watchers, IDE, CI/CD
+Crawl https://mise.jdx.dev/hooks.html and https://mise.jdx.dev/ide-integration.html and https://mise.jdx.dev/continuous-integration.html and https://mise.jdx.dev/cli/
+Focus on: hook types (cd, enter, leave, preinstall, postinstall), watch_files, IDE integration, CI/CD patterns, full CLI command reference with flags.
+
+### Agent 5: Usage Spec Reference
+Crawl https://usage.jdx.dev/spec/reference/ and all sub-pages (arg, flag, cmd, complete, config).
+Focus on: all arg attributes (12+), all flag attributes (17+), cmd structure, complete with Tera templates, config block, runtime env var access patterns, script integration, comment syntax by language.
+
+## After Research
+
+Consolidate all findings into the SKILL.md at skills/mise/SKILL.md. The file structure should be:
+
+1. Frontmatter (name: mise, description covering all areas)
+2. STRICT ENFORCEMENT section (usage field required - keep this)
+3. Overview (brief - what mise covers)
+4. Task Definition Methods (TOML, file, namespaces, remote)
+5. Task Arguments - Usage Spec Reference (comprehensive arg/flag/complete/env var access)
+6. Task Configuration Reference (ALL fields with types, structured run/depends, extends, timeout, global config, vars)
+7. Running Tasks CLI (all commands and flags)
+8. Task Dependencies & Caching (depends/sources/outputs/auto/redactions)
+9. Dev Tools Management (backends, TOML syntax, per-tool options, backend-specific config, shims, aliases)
+10. Environment Configuration (env section, directives, profiles, required/redacted, templates)
+11. Hooks & Watchers (hook types, watch_files)
+12. Configuration & Settings (file hierarchy, key settings)
+13. Experimental Features (prepare, monorepo)
+14. Best Practices (DO/DON'T, complete examples)
+
+Important rules:
+- Keep the STRICT ENFORCEMENT section at the top and unchanged
+- Include ALL configuration keys with their types
+- Include practical examples for each section
+- Note deprecations (Tera arg()/option()/flag() removed 2026.11)
+- Use tables for reference material, code blocks for examples
+- The file should be a PRACTICAL REFERENCE for Claude to generate correct mise configs
+PROMPT_EOF
+)
+
+if [ -n "${usage_dry_run:-}" ]; then
+  echo "=== Prompt that would be sent to Claude Code ==="
+  echo ""
+  echo "$PROMPT"
+  exit 0
+fi
+
+if [ "$SECTION" != "all" ]; then
+  PROMPT="$PROMPT
+
+NOTE: Only update the '$SECTION' section of SKILL.md. Keep all other sections unchanged."
+fi
+
+echo "Launching Claude Code to update SKILL.md..."
+echo "This will crawl the latest mise docs with parallel agents."
+echo ""
+echo "Section: $SECTION"
+echo "Skill file: $SKILL_FILE"
+echo ""
+
+# Copy prompt to clipboard for easy pasting into Claude Code
+echo "$PROMPT" | pbcopy 2>/dev/null && echo "Prompt copied to clipboard." || true
+echo ""
+echo "Paste the prompt into a Claude Code session to begin the update."
+echo "Or run: claude --print \"$SKILL_FILE\" and paste the prompt."
+'''
+
+[tasks."update:usage-spec"]
+description = "Update just the usage spec reference section from usage.jdx.dev"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "Launch a Claude Code agent with this prompt:"
+echo ""
+cat <<'EOF'
+Crawl https://usage.jdx.dev/spec/reference/ and all sub-pages for arg, flag, cmd, complete, and config.
+Document ALL attributes for each type with their types, defaults, and descriptions.
+Include: variadic args, count flags, negate flags, global flags, conditional requirements,
+complete with Tera templates and descriptions, config block with findup and priority order,
+runtime env var access patterns (usage_ prefix, naming rules, value types),
+script integration (shebang lines, comment syntax by language).
+Then update the "Task Arguments - Usage Spec Reference" section of skills/mise/SKILL.md.
+EOF
+'''
+
+[tasks."update:readme"]
+description = "Regenerate README.md with updated examples from SKILL.md"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "Review SKILL.md for any new features, then update README.md:"
+echo "  - Add new use cases if new capabilities were added"
+echo "  - Update the 'What's Covered' table"
+echo "  - Ensure installation instructions are current"
+echo "  - Update advanced examples if new patterns emerged"
+'''
+
+[tasks."update:version"]
+description = "Bump plugin version in plugin.json and marketplace.json"
+usage = '''
+arg "<version>" help="New version number (e.g., 1.1.0)"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+version="${usage_version?}"
+echo "Bumping to version $version..."
+
+# Update plugin.json
+jq --arg v "$version" '.version = $v' .claude-plugin/plugin.json > /tmp/plugin.json.tmp
+mv /tmp/plugin.json.tmp .claude-plugin/plugin.json
+
+# Update marketplace.json
+jq --arg v "$version" '.version = $v | .plugins[0].version = $v' .claude-plugin/marketplace.json > /tmp/marketplace.json.tmp
+mv /tmp/marketplace.json.tmp .claude-plugin/marketplace.json
+
+echo "Updated plugin.json and marketplace.json to version $version"
+echo "Don't forget to commit and push!"
+'''
+
+[tasks."update:all"]
+description = "Full update workflow: crawl docs, update skill, bump version, push"
+depends = ["update:skill"]
+usage = '''
+arg "<version>" help="New version number"
+flag "--no-push" help="Skip git push"
+'''
+depends_post = ["update:readme"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+echo "After skill update is complete:"
+echo "1. Review changes in skills/mise/SKILL.md"
+echo "2. Run: mise run update:version ${usage_version?}"
+echo "3. Run: git add -A && git commit -m 'feat: update skill to v${usage_version?}'"
+if [ -z "${usage_no_push:-}" ]; then
+  echo "4. Run: git push"
+fi
+'''
+
+[tasks.lint]
+description = "Validate skill file structure"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+skill="skills/mise/SKILL.md"
+
+echo "Checking $skill..."
+
+# Check frontmatter exists
+if ! head -1 "$skill" | grep -q "^---"; then
+  echo "ERROR: Missing frontmatter"
+  exit 1
+fi
+
+# Check required sections
+for section in "STRICT ENFORCEMENT" "Overview" "Task Definition" "Usage Spec" "Task Configuration" "Dev Tools" "Environment" "Best Practices"; do
+  if ! grep -q "$section" "$skill"; then
+    echo "WARNING: Missing section: $section"
+  fi
+done
+
+# Check for blocked patterns in examples
+if grep -n '\$1\|\$2\|\$@\|\$\*' "$skill" | grep -v "BLOCKED\|DON'T\|❌\|Never\|never\|shell-native"; then
+  echo "WARNING: Found potentially unblocked shell-native arg patterns"
+fi
+
+echo "Validation complete."
+'''
