@@ -69,16 +69,17 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 
 ## Installation
 
-Install from the official Claude Code plugin directory:
+Add the marketplace and install the plugin (run these inside Claude Code):
 
-```bash
-claude plugin install mise
+```
+/plugin marketplace add brentmitchell25/mise-plugin
+/plugin install mise@brentmitchell25
 ```
 
-Or install directly from this repository:
+Or from the CLI:
 
 ```bash
-claude plugin install --from https://github.com/brentmitchell25/mise-plugin.git
+claude plugin install mise@brentmitchell25
 ```
 
 ## Use Cases
