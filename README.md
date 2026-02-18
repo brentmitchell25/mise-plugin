@@ -43,7 +43,7 @@ claude plugin install mise
 Or install directly from this repository:
 
 ```bash
-claude plugin install --from https://github.com/brentmitchell/mise-plugin.git
+claude plugin install --from https://github.com/brentmitchell25/mise-plugin.git
 ```
 
 ## Use Cases
