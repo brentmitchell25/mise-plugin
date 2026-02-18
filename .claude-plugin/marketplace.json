@@ -1,0 +1,30 @@
+{
+  "name": "brentmitchell25",
+  "owner": {
+    "name": "Brent Mitchell"
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "description": "Comprehensive mise task configuration skill for Claude Code with proper usage field argument handling, dependencies, caching, and best practices.",
+    "repository": "https://github.com/brentmitchell25/mise-plugin",
+    "license": "MIT"
+  },
+  "plugins": [
+    {
+      "name": "mise",
+      "description": "Use when creating or editing mise, .mise.toml, or mise.toml task sections, creating mise task files in mise-tasks/ or .mise/tasks/ directories, configuring task arguments with usage field, setting task dependencies, or when user mentions mise task configuration.",
+      "source": "./",
+      "category": "development",
+      "keywords": [
+        "mise",
+        "tasks",
+        "task-runner",
+        "devtools",
+        "toml",
+        "build-system",
+        "developer-environment"
+      ],
+      "version": "1.0.0"
+    }
+  ]
+}
