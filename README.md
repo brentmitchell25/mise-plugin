@@ -561,13 +561,18 @@ The skill activates automatically when you mention mise, edit `mise.toml` files,
 
 ## Updating the Skill
 
-This repo includes a `mise.toml` with tasks for updating the skill as mise docs evolve:
+This repo includes a Claude Code slash command for updating the skill as mise docs evolve:
 
-```bash
-mise run update:skill    # Re-crawl mise docs and update SKILL.md
+```
+/update-skill    # Re-crawl mise docs and update SKILL.md
 ```
 
-See the [mise.toml](mise.toml) for the full update workflow.
+The command launches 5 parallel research agents to crawl the latest mise documentation, then consolidates findings into `skills/mise/SKILL.md`. Additional mise tasks handle versioning and validation:
+
+```bash
+mise run lint              # Validate skill file structure
+mise run update:version    # Bump plugin version
+```
 
 ## License
 
