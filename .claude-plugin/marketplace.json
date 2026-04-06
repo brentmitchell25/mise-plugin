@@ -3,7 +3,6 @@
   "owner": {
     "name": "Brent Mitchell"
   },
-  "version": "2.1.0",
   "metadata": {
     "description": "Comprehensive mise skill for Claude Code covering the full mise ecosystem: tasks, dev tools, environments, hooks, and configuration.",
     "repository": "https://github.com/brentmitchell25/mise-plugin",
