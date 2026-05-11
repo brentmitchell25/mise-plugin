@@ -20,6 +20,8 @@ description: Use when working with mise - creating/editing mise.toml or .mise.to
   - [Custom Completions (complete)](#custom-completions-complete)
   - [Accessing Arguments in Scripts](#accessing-arguments-in-scripts)
   - [File Task Headers](#file-task-headers)
+  - [Subcommands (cmd block)](#subcommands-cmd-block)
+  - [Spec-Level Metadata](#spec-level-metadata)
 - [Task Configuration Reference](#task-configuration-reference)
   - [All Task Fields](#all-task-fields)
   - [Structured run Array](#structured-run-array)
@@ -35,9 +37,18 @@ description: Use when working with mise - creating/editing mise.toml or .mise.to
   - [Per-Tool Options](#per-tool-options)
   - [Backend-Specific Configuration](#backend-specific-configuration)
   - [Shims and Aliases](#shims-and-aliases)
+  - [Shell Completion (per-directory tab-complete)](#shell-completion-per-directory-tab-complete)
+  - [Lockfiles (mise.lock)](#lockfiles-miselock)
+  - [Auto-Install Controls](#auto-install-controls)
+  - [CLI Commands for Tools](#cli-commands-for-tools)
 - [Environment Configuration](#environment-configuration)
   - [Basic Variables](#basic-variables)
   - [Special Directives (env._)](#special-directives-env_)
+    - [_.path — Prepend to PATH](#_path--prepend-to-path)
+    - [_.file — Load from .env/json/yaml/toml files](#_file--load-from-envjsonyamltoml-files)
+    - [_.source — Source shell scripts](#_source--source-shell-scripts)
+    - [_.python.venv — Auto-activate Python venv](#_pythonvenv--auto-activate-python-venv)
+    - [Plugin-Provided Directives](#plugin-provided-directives)
   - [Profiles (MISE_ENV)](#profiles-mise_env)
   - [Required and Redacted Variables](#required-and-redacted-variables)
   - [Secrets (SOPS and age)](#secrets-sops-and-age)
@@ -486,9 +497,49 @@ eval "files=($usage_files)"
 echo "Deploying to ${usage_environment?}"
 ```
 
-**Supported shebangs:** `bash`, `node`, `python`, `deno`, `pwsh`, `fish`, `zsh`, `ruby`.
+**Supported shebangs:** `bash`, `node`, `python`, `deno`, `pwsh`, `fish`, `zsh`, `ruby`, `bun`.
 
-Non-hash comment languages (Node/JS/TypeScript/Deno) use `//MISE` and `//USAGE`.
+Non-hash comment languages (Node/JS/TypeScript/Deno/Bun) use `//MISE` and `//USAGE`.
+
+### Subcommands (`cmd` block)
+
+The `usage` spec supports nested subcommands via `cmd` blocks. Each subcommand can declare its own args/flags/completions:
+
+```toml
+[tasks.deploy]
+usage = '''
+flag "-v --verbose" global=#true help="Verbose output"
+
+cmd "staging" help="Deploy to staging" {
+  arg "<service>"
+  flag "--force"
+}
+
+cmd "production" help="Deploy to production" {
+  arg "<service>"
+  flag "--canary"
+  before_help "Production deploys require approval."
+}
+'''
+```
+
+**`cmd` attributes:** `help`, `long_help`, `before_help`, `after_help`, `before_long_help`, `after_long_help`, `hide=#true`, `subcommand_required=#true`, `alias "x"` (repeatable, supports `hide=#true`), `example "header" r#"..."#`, `mount run="<cmd>"` (dynamic subcommand mounting).
+
+### Spec-Level Metadata
+
+Top-level usage keywords (rarely needed for mise tasks but supported):
+
+```
+name "..."             # display name
+bin "..."              # binary name
+version "..."          # version string
+about "..."            # short help
+long_about "..."       # long help
+before_help "..."      # text before help body
+after_help "..."       # text after help body
+example "code" header="..." help="..." lang="..."
+include file="./other.usage.kdl"   # merge another spec
+```
 
 ---
 
@@ -725,6 +776,7 @@ Vars accessed via `{{vars.key_name}}` Tera templates. **Scope precedence:** glob
 | `mise tasks edit <task>` | Edit/create task in $EDITOR |
 | `mise tasks validate` | Validate task definitions |
 | `mise watch <task>` / `mise w <task>` | Watch and re-run on file changes (requires watchexec) |
+| `mise run a ::: b ::: c` | Run multiple tasks in parallel (with separate args) |
 
 ### Execution Flags
 
@@ -773,6 +825,33 @@ Vars accessed via `{{vars.key_name}}` Tera templates. **Scope precedence:** glob
 - `timed` — Show only stdout lines that took >1s
 - `quiet` — Print only task stdout/stderr, nothing from mise itself
 - `silent` — Print nothing from tasks or mise
+
+### `mise watch` Flags
+
+Wrapper around `watchexec`. By default watches the task's `sources` glob set; override with `--watch`/`--glob`/etc.
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--watch <PATH>` | `-w` | Watch path recursively (repeatable) |
+| `--watch-non-recursive <PATH>` | `-W` | Non-recursive watch |
+| `--watch-file <PATH>` | `-F` | File listing paths to watch |
+| `--exts <EXTS>` | `-e` | Comma-separated extension filter |
+| `--filter <PATTERN>` | `-f` | Include glob |
+| `--ignore <PATTERN>` | `-i` | Exclude glob |
+| `--poll <INTERVAL>` | — | Polling instead of native fs events |
+| `--clear <MODE>` | `-c` | `clear` or `reset` between runs |
+| `--restart` | `-r` | Shorthand for `--on-busy-update=restart` |
+| `--on-busy-update <MODE>` | `-o` | `queue`, `do-nothing`, `restart`, `signal` |
+| `--signal <SIGNAL>` | `-s` | Signal to running process |
+| `--stop-signal <SIGNAL>` | — | Default SIGTERM (Unix) |
+| `--stop-timeout <DUR>` | — | Grace period before kill (default `10s`) |
+| `--debounce <DUR>` | `-d` | Debounce window (default `50ms`) |
+| `--postpone` | `-p` | Wait for first change before initial run |
+| `--delay-run <DUR>` | — | Sleep before each execution |
+| `--notify` | `-N` | Desktop notifications |
+| `--bell` | — | Terminal bell on completion |
+| `--print-events` | — | Human-readable event output |
+| `--skip-deps` | — | Run only specified tasks; skip deps |
 
 ### Parallel Tasks and Wildcards
 
@@ -1217,6 +1296,25 @@ eval "$(mise activate zsh)"
 
 **`mise reshim`:** Regenerates shim directory. Runs automatically on install/update/remove. Never manually drop binaries in the shims dir — they get deleted.
 
+### Shell Completion (per-directory tab-complete)
+
+Combined with `mise activate`, shell completions make `mise <TAB>` and `mise run <TAB>` automatically list the tasks/tools defined in the current directory's `mise.toml` — completion follows you between projects.
+
+```bash
+# bash
+mise completion bash > /etc/bash_completion.d/mise
+# zsh (ensure the dir is on $fpath)
+mise completion zsh > /usr/local/share/zsh/site-functions/_mise
+# fish
+mise completion fish > ~/.config/fish/completions/mise.fish
+# powershell
+mise completion powershell | Out-String | Invoke-Expression
+```
+
+Flag: `--include-bash-completion-lib` bundles bash-completion helpers into the script.
+
+Per-task arg completion (the `complete` block in usage spec) is separate — those are dynamic and project-defined; the CLI completion above is what makes them discoverable.
+
 **Tool aliases (remap to different backend):**
 ```toml
 [tool_alias]
@@ -1243,6 +1341,20 @@ ll = "ls -la"
 gs = "git status"
 ```
 
+### Lockfiles (`mise.lock`)
+
+mise can pin tool URLs/checksums in a `mise.lock` file for reproducibility:
+
+```bash
+mise lock                       # Update lockfile from current installs
+mise lock -p linux-x64          # Add entries for specific platform
+mise lock --minimum-release-age "30d"
+```
+
+Settings: `lockfile = true` (default), `locked = true` (require lockfile-resolved URLs), `locked_verify_provenance = true` (re-verify at install), `lockfile_platforms = ["linux-x64", "macos-arm64"]`.
+
+CI flag: `--locked` errors if any version isn't resolved via the lockfile.
+
 ### Auto-Install Controls
 
 - `auto_install` (default `true`) — master switch
@@ -1260,15 +1372,31 @@ mise install node@20        # Install without activation
 mise install                # Install all configured tools
 mise install -f "gem:*"     # Force reinstall pattern
 mise ls                     # List installed
+mise ls --current           # Active versions only
 mise ls-remote node         # List available versions
 mise which node             # Show real binary path
 mise x python@3.12 -- script.py  # Run with specific tool
 mise reshim                 # Rebuild shims
 mise registry               # List all available tools
 mise outdated               # Check for updates
-mise upgrade                # Update versions
+mise upgrade                # Update versions (respects mise.toml ranges)
+mise upgrade --bump         # Bump mise.toml to absolute latest
+mise prune                  # Remove unused versions
+mise lock                   # Update lockfile checksums/URLs
+mise lock -p linux-x64      # Add lockfile entries for specific platform
 mise search <query>         # Search registry
 mise cache clear            # Clear cached downloads
+mise sync node --nvm        # Import versions from nvm
+mise sync python --uv       # Import versions from uv
+mise sync ruby --brew       # Import versions from brew
+mise generate bootstrap -w ./bin/mise   # Self-contained install script for CI
+mise generate task-stubs    # Generate task stubs
+mise generate config        # Generate sample config
+mise generate github-action # Generate sample GitHub Action workflow
+mise generate devcontainer  # Generate devcontainer spec
+mise generate git-pre-commit # Generate pre-commit hook
+mise doctor                 # Diagnose installation issues
+mise self-update            # Update mise binary
 ```
 
 ---
@@ -1339,6 +1467,28 @@ _.source = { path = "my/env.sh", tools = true }
 ```
 
 Scripts execute with `source` semantics; shebangs are ignored.
+
+#### `_.python.venv` — Auto-activate Python venv
+
+```toml
+[env]
+_.python.venv = { path = ".venv", create = true }
+_.python.venv = { path = ".venv", uv_create = true }   # use uv to create
+_.python.venv = { path = ".venv", python = "3.12" }    # specify python version
+```
+
+Options: `path` (required), `create` (auto-create if missing), `uv_create` (use `uv venv`), `python` (version constraint).
+
+#### Plugin-Provided Directives
+
+Plugins can register custom `_.<name>` directives:
+
+```toml
+[env]
+_.my-plugin = {}
+_.my-plugin = { option1 = "value1", option2 = "value2" }
+_.vault-secrets = { vault_url = "https://vault.example.com", secrets_path = "secret/myapp" }
+```
 
 #### Multiple Identical Directives
 
