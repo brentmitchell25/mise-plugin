@@ -308,7 +308,7 @@ The `usage` field uses [KDL-inspired syntax](https://usage.jdx.dev/) to define a
 | `var` | boolean | `#false` | Variadic mode (accept multiple values). `"<name>"` requires 1+, `"[name]"` accepts 0+. Shorthand: `"<name>..."` |
 | `var_min` | integer | none | Minimum values when variadic |
 | `var_max` | integer | none | Maximum values when variadic |
-| `choices` | values | none | Restrict to enumerated set. Also supports `choices env="VAR_NAME"` |
+| `choices` | values | none | Restrict to enumerated set. Env-backed via `choices env="VAR_NAME"` (split on commas/whitespace, resolved at parse/completion time); literal + env can be **combined**: `choices "local" env="VAR"` (deduped) |
 | `double_dash` | string | none | `"required"`, `"optional"`, `"automatic"`, `"preserve"` |
 | `hide` | boolean | `#false` | Exclude from help output |
 | `parse` | string | none | Parse arg value with external command (template: `"mycli parse {}"`) |
@@ -322,6 +322,7 @@ arg "<files>" var=#true var_min=1 help="One or more files"
 arg "<files>..." help="Shorthand variadic syntax"
 arg "<env>" choices "dev" "staging" "prod" help="Target environment"
 arg "<env>" { choices env="DEPLOY_ENVS" }
+arg "<env>" { choices "local" env="DEPLOY_ENVS" }   # literal + env-backed, deduped
 arg "<args>..." double_dash="automatic" help="Pass-through arguments"
 arg "<file>" env="MY_FILE" help="Input file (or set MY_FILE)"
 ```
@@ -863,6 +864,17 @@ mise run lint ::: test ::: check  # Parallel task groups with :::
 mise run cmd1 arg1 ::: cmd2 arg2  # Parallel with separate args
 ```
 
+Glob patterns accepted in task selectors:
+
+| Pattern | Matches |
+|---------|---------|
+| `?` | Single character |
+| `*` | Zero or more characters (within one namespace segment) |
+| `**` | Zero or more nested namespace segments |
+| `{a,b,c}` | Comma-separated alternatives |
+| `[abc]` | Character set/range |
+| `[!abc]` | Negated character set |
+
 ### Default Task
 
 ```toml
@@ -896,15 +908,22 @@ run = "cargo build --release"
 # Skips if sources unchanged and outputs exist
 ```
 
+**Exclusions** use gitignore-style `!` prefixes (escape a literal `!` path with `\!`):
+```toml
+sources = ["src/**/*.ts", "!src/**/*.test.ts", "!src/**/*.spec.ts"]
+```
+
 **Auto outputs:**
 ```toml
 [tasks.build]
 sources = ["src/**/*.rs"]
-outputs = { auto = true }  # Implicit tracking via task hash
+outputs = { auto = true }  # Implicit tracking via task hash (state in ~/.local/state/mise/task-outputs/<hash>)
 run = "cargo build"
 ```
 
-Enable content-hash checking (more accurate, slower) via `task.source_freshness_hash_contents = true`.
+**Dependency invalidation:** when a depended-on task re-runs because *its* sources changed, the dependent task also re-runs even if its own sources are unchanged.
+
+Enable content-hash (blake3) checking instead of mtime via `task.source_freshness_hash_contents = true` (more accurate, slower). `task.source_freshness_equal_mtime_is_fresh = true` treats equal source/output mtime as fresh.
 
 ### Redactions (Experimental)
 
@@ -923,7 +942,7 @@ for value in $(mise env --redacted --values); do
 done
 ```
 
-`jdx/mise-action@v3` handles this automatically.
+`jdx/mise-action@v4` handles this automatically.
 
 ### Error Handling
 
@@ -942,27 +961,35 @@ echo "This will not fail the task"
 
 ### Backends Overview
 
-mise supports 18+ backend types. Recommended priority order (per official registry):
+mise supports 18+ backend types. The registry assigns tools to backends by an **acceptance-tier** preference order — prefer the highest tier available for a given tool:
 
-| Priority | Backend | Description |
-|----------|---------|-------------|
-| 1 | **aqua** | Most features, best security (cosign/SLSA/attestation/minisign). No plugins needed. |
-| 2 | **github** | GitHub releases with auto OS/arch detection |
-| 3 | **gitlab** | GitLab releases |
-| 4 | **forgejo** | Forgejo/Codeberg releases |
-| 5 | **http** | Direct HTTP/HTTPS downloads with URL templating |
-| 6 | **s3** | S3/MinIO (experimental) |
-| 7 | **pipx** | Python CLIs in isolated environments (uses uvx by default) |
-| 8 | **npm** | Node packages (auto-detects `aube`, `bun`, `pnpm`, `npm`) |
-| 9 | **go** | Go packages (requires compilation) |
-| 10 | **cargo** | Rust packages (uses binstall by default) |
-| 11 | **gem** | Ruby gems |
-| 12 | **ubi** | Universal Binary Installer (**DEPRECATED** — migrate to `github`) |
-| 13 | **dotnet** | .NET tools (experimental) |
-| 14 | **conda** | Conda packages (experimental) |
-| 15 | **spm** | Swift packages (experimental) |
-| 16 | **vfox** | vfox plugins (cross-platform, Windows-supported) |
-| 17 | **asdf** | asdf plugins (legacy, no Windows) |
+| Tier | Backends | When chosen |
+|------|----------|-------------|
+| **1 — Preferred** | **aqua**, **github**, **gitlab** | aqua offers the most features + security (cosign/SLSA/attestation/minisign, native Windows, no plugin). github/gitlab for releases not yet in aqua. |
+| **2 — High bar** | **conda** | mise's conda backend needs no conda/mamba/micromamba installed. |
+| **3 — Very high bar** | **pipx**, **npm**, **gem**, **go**, **cargo**, **dotnet** | Language-specific; require the runtime/toolchain on PATH. |
+| **Other** | **forgejo**, **http**, **s3** | forgejo (Codeberg default); http for direct URLs; s3 for private buckets (experimental). |
+| **Not accepted for new registry entries** | **vfox**, **asdf**, **ubi** | vfox/asdf rejected for supply-chain reasons; ubi deprecated. |
+
+| Backend | Status | Description |
+|---------|--------|-------------|
+| **aqua** | stable | Most features, best security (cosign/SLSA/attestation/minisign). No plugins needed. Native Windows. |
+| **github** | stable | GitHub releases with auto OS/arch/libc asset detection |
+| **gitlab** | stable | GitLab releases |
+| **forgejo** | stable | Forgejo/Codeberg releases |
+| **http** | stable | Direct HTTP/HTTPS downloads with URL templating |
+| **s3** | **experimental** | S3/MinIO/S3-compatible (requires `experimental = true`) |
+| **pipx** | stable | Python CLIs in isolated environments (uses uvx by default) |
+| **npm** | stable | Node packages (auto-detects `aube`, `npm`, `bun`, `pnpm`) |
+| **go** | stable | Go packages (requires compilation) |
+| **cargo** | stable | Rust packages (uses binstall by default) |
+| **gem** | stable | Ruby gems |
+| **conda** | stable | Single conda packages direct from anaconda.org (no conda/mamba needed) |
+| **dotnet** | **experimental** | .NET tools |
+| **spm** | **experimental** | Swift packages |
+| **ubi** | **DEPRECATED** | Universal Binary Installer — migrate to `github` |
+| **vfox** | stable | vfox plugins (cross-platform, Windows-supported) |
+| **asdf** | stable (legacy) | asdf plugins (no Windows) |
 
 > New vfox/asdf tools are rarely accepted into the registry for supply-chain reasons.
 
@@ -1061,19 +1088,20 @@ python = "3.12.11"
 "aqua:scenarigo/scenarigo" = { version = "0.21.0", vars = { go_version = "1.24" } }
 ```
 
-**Tool options:** `symlink_bins` (bool), `vars` (table, aqua registry template variables), `channel`.
+**Tool options:** `symlink_bins` (bool, filters bundled bins into `.mise-bins`), `vars` (table, aqua registry template variables), `channel`, `prerelease` (bool, include pre-releases in `ls-remote`/`latest`).
 
 **Security (all default `true`):**
 
-| Setting | Description |
-|---------|-------------|
-| `aqua.cosign` | Verify cosign signatures |
-| `aqua.slsa` | Verify SLSA provenance |
-| `aqua.github_attestations` | Verify GitHub Artifact Attestations |
-| `aqua.minisign` | Verify minisign signatures |
-| `aqua.baked_registry` | Use built-in aqua registry |
-| `aqua.registry_url` | Custom aqua registry URL |
-| `aqua.cosign_extra_args` | Additional cosign arguments |
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `aqua.cosign` | `true` | Verify cosign signatures |
+| `aqua.slsa` | `true` | Verify SLSA provenance |
+| `aqua.github_attestations` | `true` | Verify GitHub Artifact Attestations |
+| `aqua.minisign` | `true` | Verify minisign signatures |
+| `aqua.baked_registry` | `true` | Use built-in (compiled-in) aqua registry |
+| `aqua.registry_url` | none | Custom aqua registry repo URL (downloads `registry.yaml`) |
+| `aqua.registry_cache_ttl` | `1w` | Registry source freshness TTL (`0s` = always refresh) |
+| `aqua.cosign_extra_args` | none | Additional cosign arguments (string[]) |
 
 Aqua verification is native (no external CLIs needed) covering: GitHub attestations, cosign, SLSA, minisign, and SHA256/512/1/MD5.
 
@@ -1104,9 +1132,9 @@ linux-x64 = { asset_pattern = "gh_*_linux_x64.tar.gz" }
 macos-arm64 = { asset_pattern = "gh_*_macOS_arm64.tar.gz" }
 ```
 
-**Tool options:** `asset_pattern`, `version_prefix`, `platforms` (per-platform `asset_pattern`/`checksum`/`size`), `strip_components`, `bin`, `rename_exe`, `bin_path` (Tera templating `{{version}}`/`{{os}}`/`{{arch}}`), `filter_bins`, `checksum`, `size`, `no_app`, `api_url`.
+**Tool options:** `asset_pattern`, `version_prefix`, `platforms` (per-platform `asset_pattern`/`checksum`/`size`), `strip_components`, `bin`, `rename_exe`, `bin_path` (Tera templating: `{{version}}`, `{{os}}`, `{{arch}}`, `{{darwin_os}}`, `{{amd64_arch}}`, `{{x86_64_arch}}`, `{{gnu_arch}}`), `filter_bins`, `checksum`, `size`, `no_app`, `api_url`, `prerelease`.
 
-**Auth settings:** `github.credential_command`, `github.gh_cli_tokens` (default `true`), `github.github_attestations`, `github.slsa`, `github.use_git_credentials`. Env: `MISE_GITHUB_TOKEN`, `MISE_GITHUB_USE_GIT_CREDENTIALS`.
+**Auth settings:** `github.credential_command`, `github.gh_cli_tokens` (default `true`), `github.github_attestations`, `github.slsa`, `github.use_git_credentials` (default `false`). OAuth device-flow (experimental): `github.oauth_client_id`, `github.oauth_api_url`, `github.oauth_auth_url`, `github.oauth_export_env` (default `GITHUB_TOKEN`), `github.oauth_open_browser`, `github.oauth_scopes`. Env: `MISE_GITHUB_TOKEN`, `MISE_GITHUB_USE_GIT_CREDENTIALS`. Debug a resolved token with `mise token github`.
 
 #### GitLab / Forgejo Backends
 
@@ -1207,9 +1235,14 @@ Reinstall after Python upgrade: `mise install -f pipx:psf/black`
 ```toml
 [tools]
 "npm:prettier" = "latest"
+"npm:some-cli" = { version = "latest", allow_builds = ["esbuild"] }  # approve build scripts
 ```
 
 **Auto-detects package manager:** prefers `aube` if present, else `npm`, with `bun`/`pnpm` as alternatives. Override with `npm.package_manager = "auto|npm|aube|bun|pnpm"` (env: `MISE_NPM_PACKAGE_MANAGER`).
+
+**Tool options:** `allow_builds` (array of pkgs, or `true` to allow all — for aube/pnpm dependency build scripts), `aube_args`, `npm_args`, `pnpm_args`, `bun_args` (extra args to the underlying installer), `install_env`.
+
+**Lifecycle-script defaults:** npm passes `--ignore-scripts=true` (override `npm_args = "--ignore-scripts=false"`); bun runs no dependency scripts unless `bun_args = "--trust"`; aube/pnpm need `allow_builds`.
 
 Supports minimum-release-age protection (transitive supply chain) via compatible package managers (`npm >= 11.10.0`, `aube`, `bun >= 1.3.0`, `pnpm >= 10.16.0`).
 
@@ -1230,7 +1263,7 @@ Supports minimum-release-age protection (transitive supply chain) via compatible
 
 Reinstall after Ruby upgrade: `mise install -f gem:rubocop` or `mise install -f "gem:*"`.
 
-#### Conda Backend (Experimental)
+#### Conda Backend
 
 ```toml
 [tools]
@@ -1238,7 +1271,7 @@ Reinstall after Ruby upgrade: `mise install -f gem:rubocop` or `mise install -f 
 "conda:bioconductor-deseq2" = { version = "latest", channel = "bioconda" }
 ```
 
-Direct anaconda.org API — no conda/mamba required. **Single packages only** (not full environments).
+Direct anaconda.org API — no conda/mamba/micromamba required. **Single packages only** (not full environments). **Tool option:** `channel` (overrides `conda.channel`, default `conda-forge`).
 
 #### SPM Backend (Experimental)
 
@@ -1248,14 +1281,19 @@ Direct anaconda.org API — no conda/mamba required. **Single packages only** (n
 "spm:swiftlang/swiftly" = { version = "latest", filter_bins = ["swiftly"] }
 ```
 
+**Tool options:** `filter_bins` (restrict built products), `artifactbundle` (`true` = require prebuilt bundle, `false` = always build from source, unset = try bundle then source), `artifactbundle_asset` (pick a specific `.artifactbundle.zip`), `provider` (`github`/`gitlab`), `api_url`, `install_env`. **Setting:** `spm.artifactbundle_only`.
+
 #### Dotnet Backend (Experimental)
 
 ```toml
 [tools]
 "dotnet:GitVersion.Tool" = "5.12.0"
+"dotnet:GitVersion.Tool" = { version = "latest", prerelease = true }
 ```
 
-**Settings:** `dotnet.registry_url`, `dotnet.package_flags` (supports `prerelease`), `dotnet.isolated`, `dotnet.cli_telemetry_optout`, `dotnet.dotnet_root`.
+**Tool options:** `prerelease` (include pre-release versions), `install_env`.
+
+**Settings:** `dotnet.registry_url` (default NuGet), `dotnet.isolated` (default `false`), `dotnet.cli_telemetry_optout`, `dotnet.dotnet_root`. `dotnet.package_flags` is **deprecated** — use the `prerelease` tool option instead.
 
 #### vfox & asdf Plugins
 
@@ -1343,17 +1381,22 @@ gs = "git status"
 
 ### Lockfiles (`mise.lock`)
 
-mise can pin tool URLs/checksums in a `mise.lock` file for reproducibility:
+mise can pin tool URLs/checksums in a `mise.lock` file for reproducibility. Create one with `touch mise.lock && mise install`, then:
 
 ```bash
 mise lock                       # Update lockfile from current installs
-mise lock -p linux-x64          # Add entries for specific platform
+mise lock node python           # Update specific tools only
+mise lock -p linux-x64          # Add/update entries for specific platform(s)
+mise lock --local               # Update mise.local.lock instead of mise.lock
+mise lock -g                    # Target global config lockfiles
 mise lock --minimum-release-age "30d"
 ```
 
-Settings: `lockfile = true` (default), `locked = true` (require lockfile-resolved URLs), `locked_verify_provenance = true` (re-verify at install), `lockfile_platforms = ["linux-x64", "macos-arm64"]`.
+Settings: `lockfile` (read/update lockfiles), `locked = true` (require lockfile-resolved URLs; blocks API calls — good for CI), `locked_verify_provenance = true` (re-verify SLSA/cosign/minisign/attestations at install; auto-on with `paranoid`), `lockfile_platforms = ["linux-x64", "macos-arm64"]` (current platform always included).
 
-CI flag: `--locked` errors if any version isn't resolved via the lockfile.
+`minimum_release_age` setting (env `MISE_MINIMUM_RELEASE_AGE`, e.g. `"7d"`, `"90d"`, `"2026-01-01"`) filters fuzzy version requests by release date — supply-chain delay protection. Supported backends: aqua, cargo, npm, pipx.
+
+CI flag: `--locked` (global flag on any command) errors if any version isn't resolved via the lockfile.
 
 ### Auto-Install Controls
 
@@ -1368,16 +1411,22 @@ CI flag: `--locked` errors if any version isn't resolved via the lockfile.
 ```bash
 mise use node@22            # Install + activate + write to mise.toml
 mise use -g node@22         # Write to global config
+mise use --pin node@22      # Pin exact resolved version (e.g. 22.5.1)
+mise use -E staging node@22 # Write to mise.staging.toml
+mise use --remove python    # Remove a tool from config
 mise install node@20        # Install without activation
 mise install                # Install all configured tools
 mise install -f "gem:*"     # Force reinstall pattern
 mise ls                     # List installed
 mise ls --current           # Active versions only
+mise ls --prunable          # Tools eligible for prune
 mise ls-remote node         # List available versions
 mise which node             # Show real binary path
+mise where node@22          # Show install directory
 mise x python@3.12 -- script.py  # Run with specific tool
 mise reshim                 # Rebuild shims
 mise registry               # List all available tools
+mise registry --backend aqua  # Filter registry by backend
 mise outdated               # Check for updates
 mise upgrade                # Update versions (respects mise.toml ranges)
 mise upgrade --bump         # Bump mise.toml to absolute latest
@@ -1389,8 +1438,10 @@ mise cache clear            # Clear cached downloads
 mise sync node --nvm        # Import versions from nvm
 mise sync python --uv       # Import versions from uv
 mise sync ruby --brew       # Import versions from brew
+mise token github           # Show resolved host token (--unmask to reveal)
 mise generate bootstrap -w ./bin/mise   # Self-contained install script for CI
-mise generate task-stubs    # Generate task stubs
+mise generate task-stubs    # Generate task stub wrappers (bin/)
+mise generate task-docs     # Generate markdown docs for tasks
 mise generate config        # Generate sample config
 mise generate github-action # Generate sample GitHub Action workflow
 mise generate devcontainer  # Generate devcontainer spec
@@ -1453,9 +1504,11 @@ _.file = ['.env', '.env.local', '.env.{{env.MISE_ENV}}']
 _.file = { path = ".secrets.yaml", redact = true }
 ```
 
-Supported formats: `.env`, `.env.json`, `.env.yaml`, `.env.toml`. Auto-load: `MISE_ENV_FILE=.env`.
+Supported formats: `.env`, `.env.json`, `.env.yaml`, `.env.toml`. Auto-load a single dotenv with `MISE_ENV_FILE=.env` (or `env_file` setting).
 
 Options: `path` (string), `redact` (boolean), `tools` (boolean — resolve after tools).
+
+> **Deprecation:** the top-level `env_file`/`dotenv` and `env_path` keys are deprecated (removal **mise 2027.4.0**). Migrate to `_.file` and `_.path`.
 
 #### `_.source` — Source shell scripts
 
@@ -1472,12 +1525,15 @@ Scripts execute with `source` semantics; shebangs are ignored.
 
 ```toml
 [env]
+_.python.venv = ".venv"                                  # string shorthand
 _.python.venv = { path = ".venv", create = true }
-_.python.venv = { path = ".venv", uv_create = true }   # use uv to create
-_.python.venv = { path = ".venv", python = "3.12" }    # specify python version
+_.python.venv = { path = ".venv", python = "3.12" }      # specify python version
+_.python.venv = { path = ".venv", create = true, uv_create_args = ["--seed"] }  # uv venv with pip
 ```
 
-Options: `path` (required), `create` (auto-create if missing), `uv_create` (use `uv venv`), `python` (version constraint).
+Options: `path` (required), `create` (auto-create if missing), `python` (version constraint), `python_create_args` (args to `python -m venv`), `uv_create_args` (args to `uv venv`). When `uv` is installed via mise it is used automatically for creation (uv omits pip by default — add `uv_create_args = ["--seed"]`). Activation needs `mise activate`/`mise exec`; shims alone don't add the venv `bin/` to PATH.
+
+> For uv-managed projects (with `uv.lock`), prefer the `python.uv_venv_auto` setting (`"source"` or `"create|source"`) instead. The legacy `python.uv_venv_auto = true` is slated for deprecation in **2026.7**.
 
 #### Plugin-Provided Directives
 
@@ -1697,6 +1753,8 @@ PATH_SAFE = "${VAR:-default}"      # With default
 CLEAN = "${UNSET_VAR:-}"           # Empty if unset (no warning)
 ```
 
+> When unset (default today), mise warns if it detects `$` in a value. Shell expansion is scheduled to become the **default in mise 2026.7.0**.
+
 ---
 
 ## Hooks and Watchers
@@ -1721,10 +1779,13 @@ leave = "echo 'left project'"
 preinstall = "echo 'about to install'"
 postinstall = "echo 'installed'"
 
-# Multiple hooks
-enter = ["echo 'first'", "echo 'second'"]
+# Inline object form ({ run = "..." } is equivalent to the string shorthand)
+enter = { run = "echo 'entered project'" }
 
-# Shell hooks (execute in current shell context)
+# Multiple hooks
+enter = ["echo 'first'", { run = "echo 'second'" }]
+
+# Shell hooks (execute IN the current shell; shell = selector bash|zsh|fish)
 [hooks.enter]
 shell = "bash"
 script = "source completions.sh"
@@ -1736,9 +1797,9 @@ enter = ["echo 'entering'", { task = "setup" }]  # Mixed syntax
 
 # Array-of-tables form
 [[hooks.cd]]
-script = "echo 'I changed directories'"
+run = "echo 'I changed directories'"
 [[hooks.cd]]
-script = "echo 'I also changed directories'"
+run = "echo 'I also changed directories'"
 ```
 
 **Important:** Shell hooks don't auto-cleanup on directory exit like `[env]` does. Exported vars, aliases, sourced files persist — manually reverse in a corresponding `leave` hook.
@@ -1869,16 +1930,30 @@ lockfile = true             # Read/update lockfiles
 locked = false              # Fail if no pre-resolved URLs
 
 # Security
-paranoid = false            # Extra-secure behavior
+paranoid = false            # Extra-secure behavior (auto-enables locked_verify_provenance)
 gpg_verify = false          # Verify GPG signatures
 slsa = true                 # SLSA provenance verification
 github_attestations = true  # GitHub Artifact Attestations
+provenance_api_failures_fatal = true  # Treat provenance API failures as install errors
+minimum_release_age = ""    # Filter fuzzy versions by release age (e.g. "7d", "2026-01-01")
 
 # Performance
 fetch_remote_versions_cache = "1h"  # Version cache
 fetch_remote_versions_timeout = "20s"
 http_timeout = "30s"                # HTTP timeout
-http_retries = 0                    # HTTP retries with exponential backoff
+http_retries = 3                    # HTTP retries with exponential backoff (0 = none)
+cache_prune_age = "30d"             # Age before cached downloads are pruned
+use_versions_host = true            # Use mise-versions shared version cache
+
+# UI / shell
+color = true                # Colorized output
+color_theme = "default"     # auto|default|charm|base16|catppuccin|dracula
+terminal_progress = true    # OSC 9;4 terminal progress indicators
+verbose = false             # Verbose install output
+
+# Windows
+windows_shim_mode = "exe"   # exe|file|hardlink|symlink
+windows_executable_extensions = ["exe", "bat", "cmd", "com", "ps1", "vbs"]
 
 # Network
 offline = false             # Block all HTTP requests
@@ -1898,8 +1973,9 @@ verify = true
 
 # Python-specific
 [settings.python]
-uv_venv_auto = false        # Auto-create venv with uv (false|source|"create|source"|true)
+uv_venv_auto = false        # uv venv automation: false | "source" | "create|source" | true (legacy, dep. 2026.7)
 compile = false             # Compile from source
+venv_stdlib = false         # Prefer stdlib venv module over other implementations
 
 # Ruby-specific
 [settings.ruby]
@@ -1948,7 +2024,7 @@ cache_ttl = "0s"
 chpwd_only = false
 ```
 
-**All settings** support environment variable overrides using `MISE_` prefix (e.g., `MISE_JOBS=4`, `MISE_TASK_OUTPUT=interleave`).
+**All settings** support environment variable overrides using `MISE_` prefix (e.g., `MISE_JOBS=4`, `MISE_TASK_OUTPUT=interleave`). The above is a representative subset; run `mise settings --all` (or `mise settings ls`) for the complete list, and `mise settings set <key> <value>` / `mise settings get <key>` to manage them. Language backends each have their own namespace (`[settings.node]`, `[settings.python]`, `[settings.ruby]`, `[settings.go]`, `[settings.rust]`, `[settings.java]`, `[settings.erlang]`, `[settings.swift]`, `[settings.zig]`, etc.).
 
 ### Minimum Version
 
@@ -1966,24 +2042,29 @@ Tasks automatically receive:
 |----------|-------------|
 | `MISE_ORIGINAL_CWD` | Original working directory |
 | `MISE_CONFIG_ROOT` | Directory containing mise.toml |
-| `MISE_PROJECT_ROOT` | Project root directory |
+| `MISE_PROJECT_ROOT` | Project root directory (subproject dir in monorepos; stable regardless of cwd) |
+| `MISE_MONOREPO_ROOT` | Monorepo root (only set inside a monorepo with `experimental_monorepo_root = true`) |
 | `MISE_TASK_NAME` | Current task name |
 | `MISE_TASK_DIR` | Task script directory |
 | `MISE_TASK_FILE` | Full path to task script |
 
 ### CI/CD Integration
 
-**GitHub Actions (`jdx/mise-action@v3`):**
+**GitHub Actions (`jdx/mise-action@v4`):**
 
 ```yaml
-- uses: jdx/mise-action@v3
+- uses: jdx/mise-action@v4
   with:
-    version: 2024.12.14
-    install: true
-    cache: true
+    version: 2024.12.14   # mise version (default: latest)
+    install: true         # run `mise install`
+    cache: true           # cache via GitHub cache
+    experimental: false   # enable experimental features
+    # mise_toml: |        # optionally inline a mise.toml
 ```
 
 Automatically redacts values flagged with `redact = true` or matching `redactions` patterns.
+
+> mise **auto-trusts** configs when it detects a CI environment — unless `MISE_PARANOID=1` is set. Outside CI, untrusted configs must be approved with `mise trust` (`mise trust --all`, `--untrust`, `--show`).
 
 **GitLab CI:**
 
@@ -2012,6 +2093,25 @@ Or: `mise generate bootstrap -l -w` produces a self-contained install script.
 - `MISE_DATA_DIR` — install/cache root
 - `MISE_EXPERIMENTAL=1` — unlock experimental features
 - `MISE_OFFLINE=1` / `MISE_PREFER_OFFLINE=1` — network policy
+
+### IDE Integration
+
+IDEs inherit the environment from their launch shell and do not reload mise config changes. Because arbitrary `[env]` vars only load when a shim is executed, activate **shims** in your login profile so GUI-launched editors see mise tools:
+
+```bash
+# ~/.zprofile / ~/.bash_profile (login, non-interactive)
+eval "$(mise activate zsh --shims)"
+```
+
+```lua
+-- Neovim: prepend the shim dir to PATH
+vim.env.PATH = vim.env.HOME .. "/.local/share/mise/shims:" .. vim.env.PATH
+```
+
+- **VS Code:** extension `hverlin.mise-vscode` (tools, tasks, env, `mise.toml` completion); or set the integrated terminal to a login shell.
+- **JetBrains:** plugin `intellij-mise` (tools + run-configuration env); some IDEs support mise SDK selection natively.
+- **Xcode:** add `$(SRCROOT)/mise.toml` to build-phase input files, then `eval "$($HOME/.local/bin/mise activate -C $SRCROOT bash --shims)"`.
+- A tool's shim path (e.g. `~/.local/share/mise/shims/node`) also loads env vars, unlike `mise which`.
 
 ### Key Environment Variables
 
@@ -2096,13 +2196,14 @@ monorepo_respect_gitignore = true
 - Use `mise.local.toml` for personal overrides (gitignored)
 - Prefer aqua backend for security (cosign/SLSA/attestation verification)
 - Migrate from `ubi:` backend to `github:` (ubi deprecated)
-- Use `env._.file` for dotenv loading instead of `MISE_ENV_FILE`
+- Use `env._.file`/`env._.path` instead of the deprecated top-level `env_file`/`dotenv`/`env_path` (removed 2027.4.0)
 - Redact sensitive values with `redact = true`; use SOPS or direct-age for secrets
 - Use templates for dynamic values instead of hardcoding paths
 - Use `extends` to share config between similar tasks
 - Use shims in `.zprofile`/`.bash_profile` and PATH activation in `.zshrc`/`.bashrc`
 - Use `[tool_alias]` (not deprecated `[alias]`)
-- Use `jdx/mise-action@v3` in GitHub Actions — it handles masking automatically
+- Pin tool versions with `mise.lock` + `locked = true` in CI; use `minimum_release_age` for supply-chain delay
+- Use `jdx/mise-action@v4` in GitHub Actions — it handles masking automatically
 
 ### DON'T ❌
 
