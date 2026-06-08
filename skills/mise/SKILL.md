@@ -534,13 +534,31 @@ Top-level usage keywords (rarely needed for mise tasks but supported):
 name "..."             # display name
 bin "..."              # binary name
 version "..."          # version string
+min_usage_version "..." # minimum usage spec version required
+author "..."           # CLI author
+license "..."          # SPDX license identifier
 about "..."            # short help
 long_about "..."       # long help
 before_help "..."      # text before help body
 after_help "..."       # text after help body
+before_long_help "..." # before-help shown with --help
+after_long_help "..."  # after-help shown with --help
+source_code_link_template "..."  # Tera template for doc source links
 example "code" header="..." help="..." lang="..."
 include file="./other.usage.kdl"   # merge another spec
 ```
+
+**`config` block** (spec-level config-file support — distinct from the per-flag `config` attribute):
+
+```
+config {
+  file ".mycli.toml" findup=#true format="ini"   # findup searches parent dirs
+  default "color" "true"                          # default value for a config key
+  alias "old_key" "new_key"                       # alternate config-key name
+}
+```
+
+Config precedence: CLI flags > env vars > config files > defaults.
 
 ---
 
@@ -1099,7 +1117,8 @@ python = "3.12.11"
 | `aqua.github_attestations` | `true` | Verify GitHub Artifact Attestations |
 | `aqua.minisign` | `true` | Verify minisign signatures |
 | `aqua.baked_registry` | `true` | Use built-in (compiled-in) aqua registry |
-| `aqua.registry_url` | none | Custom aqua registry repo URL (downloads `registry.yaml`) |
+| `aqua.registries` | none | Extra registry repos (string[], env `MISE_AQUA_REGISTRIES`) fetched before the baked-in registry; downloads `registry.yaml` (falls back to `registry.yml`) from each repo root |
+| `aqua.registry_url` | none | **Deprecated** (use `aqua.registries`). Custom aqua registry repo URL |
 | `aqua.registry_cache_ttl` | `1w` | Registry source freshness TTL (`0s` = always refresh) |
 | `aqua.cosign_extra_args` | none | Additional cosign arguments (string[]) |
 
@@ -1379,6 +1398,15 @@ ll = "ls -la"
 gs = "git status"
 ```
 
+**Custom plugin repos (`[plugins]`):**
+```toml
+[plugins]
+node = "https://github.com/myorg/asdf-node#v2"  # optional #GITREF suffix
+my-tool = "vfox:myorg/vfox-my-tool"             # asdf:/vfox:/vfox-backend: prefixes
+```
+
+> The `[_]` table holds arbitrary user data that mise ignores during parsing — useful for sharing values with external tooling.
+
 ### Lockfiles (`mise.lock`)
 
 mise can pin tool URLs/checksums in a `mise.lock` file for reproducibility. Create one with `touch mise.lock && mise install`, then:
@@ -1421,12 +1449,18 @@ mise ls                     # List installed
 mise ls --current           # Active versions only
 mise ls --prunable          # Tools eligible for prune
 mise ls-remote node         # List available versions
+mise latest node            # Latest available version (no install)
 mise which node             # Show real binary path
 mise where node@22          # Show install directory
+mise bin-paths              # List active runtime bin paths
+mise uninstall node@20      # Remove an installed tool version
+mise link node@custom ./dir # Symlink an external install into mise
 mise x python@3.12 -- script.py  # Run with specific tool
 mise reshim                 # Rebuild shims
 mise registry               # List all available tools
 mise registry --backend aqua  # Filter registry by backend
+mise backends ls            # List available backends
+mise fmt                    # Format mise.toml (sort keys, clean whitespace)
 mise outdated               # Check for updates
 mise upgrade                # Update versions (respects mise.toml ranges)
 mise upgrade --bump         # Bump mise.toml to absolute latest
@@ -1781,6 +1815,7 @@ postinstall = "echo 'installed'"
 
 # Inline object form ({ run = "..." } is equivalent to the string shorthand)
 enter = { run = "echo 'entered project'" }
+enter = { run = "echo unix", run_windows = "echo win" }  # OS-specific variant
 
 # Multiple hooks
 enter = ["echo 'first'", { run = "echo 'second'" }]
@@ -1788,7 +1823,7 @@ enter = ["echo 'first'", { run = "echo 'second'" }]
 # Shell hooks (execute IN the current shell; shell = selector bash|zsh|fish)
 [hooks.enter]
 shell = "bash"
-script = "source completions.sh"
+script = "source completions.sh"   # `scripts = [...]` for multiple; combining shell with run/scripts warns
 
 # Task hooks
 [hooks]
@@ -1979,7 +2014,7 @@ venv_stdlib = false         # Prefer stdlib venv module over other implementatio
 
 # Ruby-specific
 [settings.ruby]
-compile = false             # Compile from source
+compile = false             # Compile from source (unset default flips to precompiled in 2026.8.0)
 ruby_install = false        # Use ruby-install instead of ruby-build
 
 # Aqua security
@@ -1989,6 +2024,7 @@ slsa = true
 github_attestations = true
 minisign = true
 baked_registry = true
+# registries = ["myorg/aqua-registry"]  # extra registries (replaces deprecated registry_url)
 
 # Cargo
 [settings.cargo]
@@ -2053,12 +2089,13 @@ Tasks automatically receive:
 **GitHub Actions (`jdx/mise-action@v4`):**
 
 ```yaml
-- uses: jdx/mise-action@v4
+- uses: jdx/mise-action@v4   # v4 current (latest v4.1.0); docs may still show v3 — v4 is correct
   with:
-    version: 2024.12.14   # mise version (default: latest)
+    version: 2026.6.1     # mise version (default: latest)
     install: true         # run `mise install`
     cache: true           # cache via GitHub cache
     experimental: false   # enable experimental features
+    # tool_versions: |    # optionally inline .tool-versions content
     # mise_toml: |        # optionally inline a mise.toml
 ```
 
@@ -2110,7 +2147,9 @@ vim.env.PATH = vim.env.HOME .. "/.local/share/mise/shims:" .. vim.env.PATH
 
 - **VS Code:** extension `hverlin.mise-vscode` (tools, tasks, env, `mise.toml` completion); or set the integrated terminal to a login shell.
 - **JetBrains:** plugin `intellij-mise` (tools + run-configuration env); some IDEs support mise SDK selection natively.
-- **Xcode:** add `$(SRCROOT)/mise.toml` to build-phase input files, then `eval "$($HOME/.local/bin/mise activate -C $SRCROOT bash --shims)"`.
+- **Xcode:** add `$(SRCROOT)/mise.toml` to build-phase input files, then `eval "$($HOME/.local/bin/mise activate -C $SRCROOT bash --shims)"`. Xcode Cloud: run the install + `mise activate bash --shims` in a `ci_post_clone.sh` script.
+- **Emacs:** package `mise.el` (`liuyinz/mise.el`) — `(global-mise-mode)`; or add the shims dir to both `PATH` and `exec-path`.
+- **Vim:** prepend the shims dir in vimscript — `let $PATH = $HOME . '/.local/share/mise/shims:' . $PATH`.
 - A tool's shim path (e.g. `~/.local/share/mise/shims/node`) also loads env vars, unlike `mise which`.
 
 ### Key Environment Variables
@@ -2136,7 +2175,7 @@ vim.env.PATH = vim.env.HOME .. "/.local/share/mise/shims:" .. vim.env.PATH
 Ensures project dependencies are installed before task execution. Requires `MISE_EXPERIMENTAL=1`.
 
 ```bash
-mise prepare
+mise prepare        # alias: mise deps
 ```
 
 ```toml
@@ -2209,7 +2248,7 @@ monorepo_respect_gitignore = true
 
 - Use `$1`, `$2`, `$@`, `$*` for arguments
 - Use `$args` in PowerShell
-- Use inline `{{arg(name="x")}}` syntax (deprecated, removed 2026.11)
+- Use inline template functions `{{arg()}}`/`{{option()}}`/`{{flag()}}` in run scripts (deprecated, removed 2026.11)
 - Forget to quote glob patterns in sources
 - Set env vars in `env` that deps need (they don't inherit — use structured `depends` with `env`)
 - Use `raw = true` unless interactive input needed (forces single-threaded, bypasses redactions)
