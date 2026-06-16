@@ -51,16 +51,19 @@ description: Use when working with mise - creating/editing mise.toml or .mise.to
     - [Plugin-Provided Directives](#plugin-provided-directives)
   - [Profiles (MISE_ENV)](#profiles-mise_env)
   - [Required and Redacted Variables](#required-and-redacted-variables)
-  - [Secrets (SOPS and age)](#secrets-sops-and-age)
+  - [Secrets (fnox, SOPS, age)](#secrets-fnox-sops-age)
   - [Templates (Tera)](#templates-tera)
 - [Hooks and Watchers](#hooks-and-watchers)
+- [Machine Bootstrap (Developer Setup)](#machine-bootstrap-developer-setup)
+  - [`[bootstrap]` Configuration](#bootstrap-configuration)
+  - [Declarative Dotfiles (`[dotfiles]`)](#declarative-dotfiles-dotfiles)
 - [Configuration and Settings](#configuration-and-settings)
   - [File Hierarchy](#file-hierarchy)
   - [Key Settings Reference](#key-settings-reference)
   - [Minimum Version](#minimum-version)
   - [Automatic Environment Variables](#automatic-environment-variables)
 - [Prepare Feature (Experimental)](#prepare-feature-experimental)
-- [Monorepo Tasks (Experimental)](#monorepo-tasks-experimental)
+- [Monorepo Tasks](#monorepo-tasks)
 - [Best Practices](#best-practices)
 
 ---
@@ -125,6 +128,7 @@ mise is an all-in-one developer environment tool that manages:
 - **Tasks** — project-specific commands with argument handling, dependencies, caching
 - **Environments** — manage env vars, profiles, dotenv files, secrets, age/sops-encrypted values
 - **Hooks** — run commands on directory changes, project enter/leave, tool install
+- **Machine bootstrap** — provision a whole dev machine (system packages, dotfiles, macOS defaults, services, login shell) via `mise bootstrap`
 
 **Key Features:**
 - Parallel dependency building (concurrent by default, up to `jobs` setting)
@@ -821,7 +825,7 @@ Vars accessed via `{{vars.key_name}}` Tera templates. **Scope precedence:** glob
 | `--skip-tools` | — | Skip installing tools before running tasks |
 | `--no-cache` | — | Skip cache on remote tasks |
 
-**Experimental sandbox flags:**
+**Sandbox / permission flags** (stable since v2026.6.6):
 
 | Flag | Description |
 |------|-------------|
@@ -986,7 +990,7 @@ mise supports 18+ backend types. The registry assigns tools to backends by an **
 | **1 — Preferred** | **aqua**, **github**, **gitlab** | aqua offers the most features + security (cosign/SLSA/attestation/minisign, native Windows, no plugin). github/gitlab for releases not yet in aqua. |
 | **2 — High bar** | **conda** | mise's conda backend needs no conda/mamba/micromamba installed. |
 | **3 — Very high bar** | **pipx**, **npm**, **gem**, **go**, **cargo**, **dotnet** | Language-specific; require the runtime/toolchain on PATH. |
-| **Other** | **forgejo**, **http**, **s3** | forgejo (Codeberg default); http for direct URLs; s3 for private buckets (experimental). |
+| **Other** | **forgejo**, **http**, **s3**, **pkgx** | forgejo (Codeberg default); http for direct URLs; s3 for private buckets; pkgx (experimental) for the pkgx pantry. |
 | **Not accepted for new registry entries** | **vfox**, **asdf**, **ubi** | vfox/asdf rejected for supply-chain reasons; ubi deprecated. |
 
 | Backend | Status | Description |
@@ -996,15 +1000,16 @@ mise supports 18+ backend types. The registry assigns tools to backends by an **
 | **gitlab** | stable | GitLab releases |
 | **forgejo** | stable | Forgejo/Codeberg releases |
 | **http** | stable | Direct HTTP/HTTPS downloads with URL templating |
-| **s3** | **experimental** | S3/MinIO/S3-compatible (requires `experimental = true`) |
+| **s3** | stable | S3/MinIO/S3-compatible private buckets (AWS SDK credential chain) |
 | **pipx** | stable | Python CLIs in isolated environments (uses uvx by default) |
 | **npm** | stable | Node packages (auto-detects `aube`, `npm`, `bun`, `pnpm`) |
 | **go** | stable | Go packages (requires compilation) |
 | **cargo** | stable | Rust packages (uses binstall by default) |
 | **gem** | stable | Ruby gems |
 | **conda** | stable | Single conda packages direct from anaconda.org (no conda/mamba needed) |
-| **dotnet** | **experimental** | .NET tools |
-| **spm** | **experimental** | Swift packages |
+| **dotnet** | stable | .NET tools |
+| **spm** | stable | Swift packages |
+| **pkgx** | **experimental** | pkgx pantry packages (bottles from dist.pkgx.dev); requires `experimental = true` |
 | **ubi** | **DEPRECATED** | Universal Binary Installer — migrate to `github` |
 | **vfox** | stable | vfox plugins (cross-platform, Windows-supported) |
 | **asdf** | stable (legacy) | asdf plugins (no Windows) |
@@ -1151,20 +1156,26 @@ linux-x64 = { asset_pattern = "gh_*_linux_x64.tar.gz" }
 macos-arm64 = { asset_pattern = "gh_*_macOS_arm64.tar.gz" }
 ```
 
-**Tool options:** `asset_pattern`, `version_prefix`, `platforms` (per-platform `asset_pattern`/`checksum`/`size`), `strip_components`, `bin`, `rename_exe`, `bin_path` (Tera templating: `{{version}}`, `{{os}}`, `{{arch}}`, `{{darwin_os}}`, `{{amd64_arch}}`, `{{x86_64_arch}}`, `{{gnu_arch}}`), `filter_bins`, `checksum`, `size`, `no_app`, `api_url`, `prerelease`.
+**Tool options:** `asset_pattern`, `matching` (substring pre-filter on asset names; preserves OS/arch autodetection), `matching_regex` (regex pre-filter; case-sensitive — prefix `(?i)` for insensitive), `version_prefix`, `platforms` (per-platform `asset_pattern`/`checksum`/`size`), `strip_components`, `bin`, `rename_exe`, `bin_path` (Tera templating: `{{version}}`, `{{os}}`, `{{arch}}`, `{{darwin_os}}`, `{{amd64_arch}}`, `{{x86_64_arch}}`, `{{gnu_arch}}`), `filter_bins`, `checksum`, `size`, `no_app`, `api_url`, `prerelease`.
 
-**Auth settings:** `github.credential_command`, `github.gh_cli_tokens` (default `true`), `github.github_attestations`, `github.slsa`, `github.use_git_credentials` (default `false`). OAuth device-flow (experimental): `github.oauth_client_id`, `github.oauth_api_url`, `github.oauth_auth_url`, `github.oauth_export_env` (default `GITHUB_TOKEN`), `github.oauth_open_browser`, `github.oauth_scopes`. Env: `MISE_GITHUB_TOKEN`, `MISE_GITHUB_USE_GIT_CREDENTIALS`. Debug a resolved token with `mise token github`.
+> **Multi-binary releases:** the same backend reused with a different `matching` overwrites the prior entry — give each binary a distinct `[tool_alias]` mapping to the repo, then set `matching` + `rename_exe` per tool (e.g. `oxlint`/`oxfmt` both → `github:oxc-project/oxc`).
+
+**Auth settings:** `github.credential_command`, `github.gh_cli_tokens` (default `true`), `github.github_attestations`, `github.slsa`, `github.use_git_credentials` (default `false`). OAuth device-flow: `github.oauth_client_id`, `github.oauth_api_url`, `github.oauth_auth_url`, `github.oauth_export_env` (default `GITHUB_TOKEN`), `github.oauth_open_browser`, `github.oauth_scopes`. Env: `MISE_GITHUB_TOKEN`, `MISE_GITHUB_USE_GIT_CREDENTIALS`. Debug a resolved token with `mise token github`.
 
 #### GitLab / Forgejo Backends
 
-Same option surface as GitHub (`asset_pattern`, `platforms`, `bin`, `bin_path`, `rename_exe`, `filter_bins`, `checksum`, `size`, `strip_components`, `api_url`).
+Same option surface as GitHub (`asset_pattern`, `matching`, `matching_regex`, `platforms`, `bin`, `bin_path`, `rename_exe`, `filter_bins`, `checksum`, `size`, `strip_components`, `api_url`). Forgejo also supports `prerelease`.
 
 ```toml
 "gitlab:gitlab-org/gitlab-runner" = "16.8.0"
 "forgejo:user/repo" = "latest"  # Defaults to Codeberg
 ```
 
-**Forgejo auth order:** `MISE_FORGEJO_ENTERPRISE_TOKEN` → `MISE_FORGEJO_TOKEN` → `FORGEJO_TOKEN` → credential_command → forgejo_tokens.toml → `fj` CLI → git credential fill.
+**GitLab auth order:** `MISE_GITLAB_ENTERPRISE_TOKEN` → `MISE_GITLAB_TOKEN` → `GITLAB_TOKEN` → credential_command → gitlab_tokens.toml → `glab` CLI → git credential fill. Settings: `gitlab.glab_cli_tokens` (default `true`), `gitlab.use_git_credentials` (default `false`). Debug with `mise token gitlab [--unmask]`.
+
+**Forgejo auth order:** `MISE_FORGEJO_ENTERPRISE_TOKEN` → `MISE_FORGEJO_TOKEN` → `FORGEJO_TOKEN` → credential_command → forgejo_tokens.toml → `fj` CLI → git credential fill. Setting: `forgejo.fj_cli_tokens` (default `true`).
+
+A `credential_command` receives `MISE_CREDENTIAL_HOST` and `MISE_CREDENTIAL_PROVIDER` env vars (the legacy single positional argument is deprecated after mise 2026.11.0). For security, `*.credential_command` is **global-config-only** — it is stripped from project/local `mise.toml` (with a warning).
 
 #### HTTP Backend
 
@@ -1193,9 +1204,9 @@ linux-x64 = { url = "https://example.com/tool-linux-x64.tar.gz", checksum = "sha
 
 **Caching:** `$MISE_CACHE_DIR/http-tarballs/` (Blake3 keys); auto-pruned after 30 days.
 
-#### S3 Backend (Experimental)
+#### S3 Backend
 
-Requires `experimental = true`.
+Install from Amazon S3 / S3-compatible storage (MinIO, DigitalOcean Spaces) — useful for private/internal tools.
 
 ```toml
 [tools."s3:my-internal-tool"]
@@ -1292,7 +1303,7 @@ Reinstall after Ruby upgrade: `mise install -f gem:rubocop` or `mise install -f 
 
 Direct anaconda.org API — no conda/mamba/micromamba required. **Single packages only** (not full environments). **Tool option:** `channel` (overrides `conda.channel`, default `conda-forge`).
 
-#### SPM Backend (Experimental)
+#### SPM Backend
 
 ```toml
 [tools]
@@ -1302,7 +1313,7 @@ Direct anaconda.org API — no conda/mamba/micromamba required. **Single package
 
 **Tool options:** `filter_bins` (restrict built products), `artifactbundle` (`true` = require prebuilt bundle, `false` = always build from source, unset = try bundle then source), `artifactbundle_asset` (pick a specific `.artifactbundle.zip`), `provider` (`github`/`gitlab`), `api_url`, `install_env`. **Setting:** `spm.artifactbundle_only`.
 
-#### Dotnet Backend (Experimental)
+#### Dotnet Backend
 
 ```toml
 [tools]
@@ -1313,6 +1324,17 @@ Direct anaconda.org API — no conda/mamba/micromamba required. **Single package
 **Tool options:** `prerelease` (include pre-release versions), `install_env`.
 
 **Settings:** `dotnet.registry_url` (default NuGet), `dotnet.isolated` (default `false`), `dotnet.cli_telemetry_optout`, `dotnet.dotnet_root`. `dotnet.package_flags` is **deprecated** — use the `prerelease` tool option instead.
+
+#### Pkgx Backend (Experimental)
+
+Installs packages from the pkgx pantry without shelling out to the pkgx CLI (bottles fetched from `dist.pkgx.dev`, checksums verified). Requires `experimental = true`.
+
+```toml
+[tools]
+"pkgx:stedolan.github.io/jq" = "1.7.1"
+```
+
+Supports npm-style semver ranges; runtime env comes from pantry manifests via generated wrappers. Lockfile entries are recorded under `[pkgx-packages]` (URLs, checksums, transitive deps); use `mise lock` / `mise install --locked`.
 
 #### vfox & asdf Plugins
 
@@ -1422,7 +1444,7 @@ mise lock --minimum-release-age "30d"
 
 Settings: `lockfile` (read/update lockfiles), `locked = true` (require lockfile-resolved URLs; blocks API calls — good for CI), `locked_verify_provenance = true` (re-verify SLSA/cosign/minisign/attestations at install; auto-on with `paranoid`), `lockfile_platforms = ["linux-x64", "macos-arm64"]` (current platform always included).
 
-`minimum_release_age` setting (env `MISE_MINIMUM_RELEASE_AGE`, e.g. `"7d"`, `"90d"`, `"2026-01-01"`) filters fuzzy version requests by release date — supply-chain delay protection. Supported backends: aqua, cargo, npm, pipx.
+`minimum_release_age` setting (env `MISE_MINIMUM_RELEASE_AGE`, **default `24h`**, e.g. `"7d"`, `"90d"`, `"2026-01-01"`) filters fuzzy version requests by release date — supply-chain delay protection. Exempt specific tools with `minimum_release_age_excludes = ["node", "..."]`. Supported backends: aqua, cargo, npm, pipx.
 
 CI flag: `--locked` (global flag on any command) errors if any version isn't resolved via the lockfile.
 
@@ -1482,6 +1504,11 @@ mise generate devcontainer  # Generate devcontainer spec
 mise generate git-pre-commit # Generate pre-commit hook
 mise doctor                 # Diagnose installation issues
 mise self-update            # Update mise binary
+mise mcp                    # Run mise as a Model Context Protocol (MCP) server
+mise dotfiles               # Manage dotfile synchronization
+mise oci                    # Build/inspect OCI container images with mise tools
+mise en                     # Spawn a sub-shell with the project env loaded
+mise test-tool <tool>       # Verify a tool installs/builds correctly
 ```
 
 ---
@@ -1495,6 +1522,10 @@ mise self-update            # Update mise binary
 NODE_ENV = 'production'
 DEBUG = 'app:*'
 PORT = 3000
+
+# Default — applied only when the var is unset/empty (existing non-empty values win).
+# Works in [env] and config/task [vars]; cannot be combined with value/required/age.
+EDITOR = { default = 'vim' }
 
 # Unset a variable
 UNWANTED_VAR = false
@@ -1567,7 +1598,7 @@ _.python.venv = { path = ".venv", create = true, uv_create_args = ["--seed"] }  
 
 Options: `path` (required), `create` (auto-create if missing), `python` (version constraint), `python_create_args` (args to `python -m venv`), `uv_create_args` (args to `uv venv`). When `uv` is installed via mise it is used automatically for creation (uv omits pip by default — add `uv_create_args = ["--seed"]`). Activation needs `mise activate`/`mise exec`; shims alone don't add the venv `bin/` to PATH.
 
-> For uv-managed projects (with `uv.lock`), prefer the `python.uv_venv_auto` setting (`"source"` or `"create|source"`) instead. The legacy `python.uv_venv_auto = true` is slated for deprecation in **2026.7**.
+> For uv-managed projects (with `uv.lock`), prefer the `python.uv_venv_auto` setting (`"source"` or `"create|source"`) instead. The legacy boolean form `python.uv_venv_auto = true` is slated to be deprecated in a future release.
 
 #### Plugin-Provided Directives
 
@@ -1640,7 +1671,13 @@ API_KEY = { value = "secret_key_here", redact = true }
 redactions = ["*_TOKEN", "SECRET_*", "API_*"]
 ```
 
-### Secrets (SOPS and age)
+### Secrets (fnox, SOPS, age)
+
+mise documents three approaches to secrets:
+
+1. **fnox (recommended)** — a separate [@jdx](https://github.com/jdx) project: a full secret manager with remote storage (1Password, AWS Secrets Manager) and remote encryption (AWS KMS). Works standalone; no mise-specific integration required.
+2. **SOPS** — encrypt entire files, load via `env._.file` (below).
+3. **Direct age** — encrypt individual env vars inline in `mise.toml` (below).
 
 **SOPS (experimental, age-backed):**
 
@@ -1670,13 +1707,13 @@ mise set --age-encrypt --prompt DB_PASSWORD
 
 Flags: `--age-encrypt`, `--age-recipient <KEY>`, `--age-ssh-recipient <PATH|KEY>`, `--age-key-file <PATH>`.
 
-Stored in mise.toml:
+Stored in mise.toml (an optional `format` of `"raw"` or `"zstd"` may appear — zstd is used automatically for values larger than ~1KB):
 ```toml
 [env]
 DB_PASSWORD = { age = { value = "<base64>" } }
 ```
 
-**Settings:** `age.identity_files`, `age.key_file`, `age.ssh_identity_files`, `age.strict` (default `true`).
+**Settings:** `age.identity_files`, `age.key_file` (default `~/.config/mise/age.txt`), `age.ssh_identity_files`, `age.strict` (default `true`). **Decryption key resolution:** `MISE_AGE_KEY` → `age.identity_files` → `age.key_file` → `~/.config/mise/age.txt` → SSH identities.
 
 Decrypted values are automatically marked for redaction.
 
@@ -1793,7 +1830,7 @@ CLEAN = "${UNSET_VAR:-}"           # Empty if unset (no warning)
 
 ## Hooks and Watchers
 
-### Hook Types (Experimental)
+### Hook Types
 
 | Hook | Trigger | Requires `mise activate`? |
 |------|---------|--------------------------|
@@ -1839,6 +1876,8 @@ run = "echo 'I also changed directories'"
 
 **Important:** Shell hooks don't auto-cleanup on directory exit like `[env]` does. Exported vars, aliases, sourced files persist — manually reverse in a corresponding `leave` hook.
 
+> Shell hooks (`shell` + `script`/`scripts`) apply only to `cd`/`enter`/`leave`. For `preinstall`/`postinstall`, use `run` — the `script` key is deprecated for those hooks and a `shell` selector is ignored.
+
 ### Watch Files
 
 ```toml
@@ -1876,6 +1915,133 @@ Preinstall/postinstall hooks receive:
 node = { version = "22", postinstall = "corepack enable" }
 python = { version = "3.12", postinstall = "pip install pipx" }
 ```
+
+---
+
+## Machine Bootstrap (Developer Setup)
+
+`mise bootstrap` (added **v2026.6.6**) provisions an entire machine from declarative config — system packages, dotfiles, macOS defaults, services, login shell, tools, and a custom `bootstrap` task. This is the one-command path for onboarding a new developer or setting up a fresh machine.
+
+```bash
+mise bootstrap              # run the full setup
+mise bootstrap -n           # --dry-run: preview without changing anything
+mise bootstrap -y           # --yes: skip confirmation prompts
+mise bootstrap --update     # refresh package-manager metadata first
+mise bootstrap --force-dotfiles   # overwrite conflicting whole-file dotfiles
+```
+
+**Execution order** (each phase is also runnable on its own — e.g. `mise bootstrap packages install`, `mise bootstrap macos-defaults apply`, `mise bootstrap user apply`):
+
+1. `[bootstrap.hooks.pre-packages]`
+2. `mise bootstrap packages install` (system packages)
+3. `mise dotfiles apply`
+4. `mise bootstrap macos-defaults apply`
+5. `mise bootstrap launchd apply` (macOS) / `systemd apply` (Linux)
+6. `mise bootstrap user apply` (login shell)
+7. `mise install` (tools)
+8. `mise run bootstrap` task (if defined)
+9. `[bootstrap.hooks.final]`
+
+Subcommands: `mise bootstrap {packages|macos-defaults|launchd|systemd|user} <apply|install|…>`; `mise bootstrap packages brew tap|untap` manages third-party Homebrew taps.
+
+> System-package installs are gated by the experimental `[settings.system_packages]` settings (`sudo`, `managers`).
+
+### `[bootstrap]` Configuration
+
+```toml
+# System packages — prefix with the manager: apk: apt: dnf: pacman: brew: brew-cask: mas:
+[bootstrap.packages]
+"apt:build-essential" = "latest"
+"apk:curl" = "*"                    # Alpine apk (version: "@2.45.2-r0" form)
+"brew:postgresql@17" = "latest"
+"brew-cask:firefox" = "latest"      # app-bundle casks, no local Homebrew required
+"mas:497799835" = "latest"          # Mac App Store apps by ADAM ID
+
+# macOS — high-level convenience blocks…
+[bootstrap.macos.dock]
+autohide = true
+orientation = "left"
+tilesize = 48
+
+[bootstrap.macos.finder]
+show_pathbar = true
+
+[bootstrap.macos.keyboard]
+key_repeat = 2
+initial_key_repeat = 15
+
+[bootstrap.macos.trackpad]
+tap_to_click = true
+
+# …or raw user defaults by domain
+[bootstrap.macos.defaults]
+"com.apple.finder" = { AppleShowAllFiles = true }
+
+# Services (launchd on macOS, systemd on Linux)
+[bootstrap.macos.launchd.agents.my-sync]
+program = "~/.local/bin/my-sync"
+args = ["--watch"]
+run_at_load = true
+
+[bootstrap.linux.systemd.units.my-sync]
+description = "sync files"
+exec_start = "~/.local/bin/my-sync --watch"
+restart = "on-failure"
+
+# Converge the login shell (runs chsh, updates /etc/shells when needed)
+[bootstrap.user]
+login_shell = "/bin/zsh"
+
+# Lifecycle hooks (each takes a run field; phases: pre-packages, post-dotfiles,
+# post-defaults, post-tools, final — all honor --dry-run)
+[bootstrap.hooks.pre-packages]
+run = "softwareupdate --install-rosetta --agree-to-license"
+[bootstrap.hooks.post-defaults]
+run = "killall Dock || true"
+
+[tools]
+node = "lts"
+python = "3.12"
+
+# Custom task — the last app-level step, after tools install
+[tasks.bootstrap]
+run = "gh auth status || gh auth login"
+```
+
+### Declarative Dotfiles (`[dotfiles]`)
+
+Manage dotfiles declaratively; applied during `mise bootstrap` (step 3) or standalone via `mise dotfiles apply`. Entries are keyed by target path.
+
+```toml
+[settings]
+dotfiles.root = "~/.dotfiles"      # default source root
+dotfiles.default_mode = "symlink"  # symlink|symlink-each|copy|template
+
+[dotfiles]
+"~/.zshrc" = {}                                   # source mirrors target under dotfiles.root
+"~/.gitconfig" = "dotfiles/gitconfig"             # string shorthand = source path
+"~/.config/alacritty.toml" = { mode = "copy" }
+"~/.ssh/config" = { source = "dotfiles/ssh_config.tmpl", mode = "template" }
+"~/.local/bin" = { source = "dotfiles/bin", mode = "symlink-each" }
+"~/.config/*.toml" = "dotfiles/config/*.toml"     # glob: * ** ? [ab] (target must match)
+# Block / line edits to files mise does NOT own (key = target/edit-id)
+"~/.zshrc/activate" = { block = 'eval "$(mise activate zsh)"' }
+"/etc/hosts/dev" = { line = "127.0.0.1 dev.local" }
+"~/.gitconfig/identity" = { source = "snippets/git-identity.tmpl", template = "tera" }
+```
+
+**Modes:** `symlink` (default; one link for a file or whole directory) · `symlink-each` (directory source → per-file links, so the target dir can also hold files mise doesn't manage) · `copy` (a real file/dir, for tools that rewrite their config in place) · `template` (render the source through mise's Tera engine).
+
+**Block edits** wrap content in marker comments (`# >>> mise:id >>>` … `# <<< mise:id <<<`); the comment style is inferred per file type (override with `comment`). **Line edits** append a single line if absent.
+
+```bash
+mise dotfiles status [--missing]   # applied/missing/differs; --missing exits 1 if out of sync
+mise dotfiles apply [--dry-run] [--verbose] [--yes] [--force]
+mise dotfiles add ~/.zshrc         # capture a live file into dotfiles.root
+mise dotfiles edit [--apply] ~/.zshrc
+```
+
+> `mise oci build` bakes `[dotfiles]` and `apt:` `[bootstrap.packages]` into container images as dedicated, annotated OCI layers.
 
 ---
 
@@ -1947,10 +2113,11 @@ task.skip_depends = false   # Skip dependencies
 task.source_freshness_hash_contents = false  # blake3 content check
 
 # Environment
-env_shell_expand = true     # Enable $VAR expansion
+env_shell_expand = true     # Enable shell-style expansion (default-on in 2026.7.0)
 env_cache = false           # Cache computed environment
 env_cache_ttl = "1h"        # Cache TTL
 env_file = ""               # MISE_ENV_FILE
+auto_env = false            # Auto-load platform/profile env files (default-on in 2027.6.0)
 
 # Tool management
 auto_install = true         # Auto-install missing tools
@@ -1958,11 +2125,14 @@ exec_auto_install = true    # Auto-install on mise x/run
 not_found_auto_install = true
 auto_install_disable_tools = []
 disable_backends = ["asdf"] # Disable backends
+disable_default_registry = false  # Ignore the built-in registry
 enable_tools = []           # Allowlist (restricts tools)
 disable_tools = []
 pin = false                 # Default --pin for mise use
 lockfile = true             # Read/update lockfiles
+lockfile_platforms = []     # Extra platforms to resolve in the lockfile
 locked = false              # Fail if no pre-resolved URLs
+prereleases = false         # Allow pre-release versions for fuzzy requests
 
 # Security
 paranoid = false            # Extra-secure behavior (auto-enables locked_verify_provenance)
@@ -1970,7 +2140,9 @@ gpg_verify = false          # Verify GPG signatures
 slsa = true                 # SLSA provenance verification
 github_attestations = true  # GitHub Artifact Attestations
 provenance_api_failures_fatal = true  # Treat provenance API failures as install errors
-minimum_release_age = ""    # Filter fuzzy versions by release age (e.g. "7d", "2026-01-01")
+netrc = true                # Honor ~/.netrc for HTTP auth (netrc_file overrides path)
+minimum_release_age = "24h" # Filter fuzzy versions by release age (default 24h; e.g. "7d", "2026-01-01")
+minimum_release_age_excludes = []  # Tools exempt from the release-age delay
 
 # Performance
 fetch_remote_versions_cache = "1h"  # Version cache
@@ -2008,7 +2180,7 @@ verify = true
 
 # Python-specific
 [settings.python]
-uv_venv_auto = false        # uv venv automation: false | "source" | "create|source" | true (legacy, dep. 2026.7)
+uv_venv_auto = false        # uv venv automation: false | "source" | "create|source" | true (legacy true form to be deprecated)
 compile = false             # Compile from source
 venv_stdlib = false         # Prefer stdlib venv module over other implementations
 
@@ -2058,6 +2230,15 @@ age_key_file = "~/.config/mise/age.txt"
 [settings.hook_env]
 cache_ttl = "0s"
 chpwd_only = false
+
+# Dotfiles (mise dotfiles)
+[settings.dotfiles]
+default_mode = "symlink"    # symlink|symlink-each|copy|template
+root = "~/.dotfiles"
+
+# System packages (experimental)
+[settings.system_packages]
+sudo = true                 # set managers = [...] to pick package managers
 ```
 
 **All settings** support environment variable overrides using `MISE_` prefix (e.g., `MISE_JOBS=4`, `MISE_TASK_OUTPUT=interleave`). The above is a representative subset; run `mise settings --all` (or `mise settings ls`) for the complete list, and `mise settings set <key> <value>` / `mise settings get <key>` to manage them. Language backends each have their own namespace (`[settings.node]`, `[settings.python]`, `[settings.ruby]`, `[settings.go]`, `[settings.rust]`, `[settings.java]`, `[settings.erlang]`, `[settings.swift]`, `[settings.zig]`, etc.).
@@ -2079,7 +2260,7 @@ Tasks automatically receive:
 | `MISE_ORIGINAL_CWD` | Original working directory |
 | `MISE_CONFIG_ROOT` | Directory containing mise.toml |
 | `MISE_PROJECT_ROOT` | Project root directory (subproject dir in monorepos; stable regardless of cwd) |
-| `MISE_MONOREPO_ROOT` | Monorepo root (only set inside a monorepo with `experimental_monorepo_root = true`) |
+| `MISE_MONOREPO_ROOT` | Monorepo root (set inside a monorepo with `monorepo_root = true`) |
 | `MISE_TASK_NAME` | Current task name |
 | `MISE_TASK_DIR` | Task script directory |
 | `MISE_TASK_FILE` | Full path to task script |
@@ -2099,9 +2280,9 @@ Tasks automatically receive:
     # mise_toml: |        # optionally inline a mise.toml
 ```
 
-Automatically redacts values flagged with `redact = true` or matching `redactions` patterns.
+Automatically redacts values flagged with `redact = true` or matching `redactions` patterns. When a `mise.lock` is present, `mise-action@v4` auto-applies `--locked` so CI cannot mutate the lockfile.
 
-> mise **auto-trusts** configs when it detects a CI environment — unless `MISE_PARANOID=1` is set. Outside CI, untrusted configs must be approved with `mise trust` (`mise trust --all`, `--untrust`, `--show`).
+> mise **auto-trusts** configs when it detects a CI environment — unless `MISE_PARANOID=1` is set. Outside CI, untrusted configs must be approved with `mise trust` (`mise trust --all`, `--untrust`, `--show`). Since v2026.6.6, **safe** `mise.toml` files (no templates; only `min_version` and plain `[tools]`/`[tasks]` string values) also auto-load without a trust prompt; anything with templates or richer constructs still requires trust. Trust-sensitive keys (`ci`, `paranoid`, `trusted_config_paths`, `yes`) are ignored when set from project/local config — only global config, CLI flags, and env vars apply.
 
 **GitLab CI:**
 
@@ -2194,14 +2375,14 @@ Disable auto-run: `mise run --no-prepare <task>`.
 
 ---
 
-## Monorepo Tasks (Experimental)
+## Monorepo Tasks
 
 ```toml
 # Root mise.toml
-experimental_monorepo_root = true
+monorepo_root = true   # was experimental_monorepo_root (kept as a hidden alias)
 ```
 
-Requires `MISE_EXPERIMENTAL=1`. Implicit trust for descendants; lazy task loading; subdirs inherit parent tools.
+No longer requires `MISE_EXPERIMENTAL=1` (stable since v2026.6.6). Implicit trust for descendants; lazy task loading; subdirs inherit parent tools.
 
 ```bash
 mise //projects/frontend:build    # Absolute path from root
@@ -2243,6 +2424,7 @@ monorepo_respect_gitignore = true
 - Use `[tool_alias]` (not deprecated `[alias]`)
 - Pin tool versions with `mise.lock` + `locked = true` in CI; use `minimum_release_age` for supply-chain delay
 - Use `jdx/mise-action@v4` in GitHub Actions — it handles masking automatically
+- Use `mise bootstrap` with `[bootstrap]`/`[dotfiles]` to onboard new developers and provision fresh machines in one command
 
 ### DON'T ❌
 
