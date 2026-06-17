@@ -774,7 +774,7 @@ Vars accessed via `{{vars.key_name}}` Tera templates. **Scope precedence:** glob
 | `task.remote_no_cache` | bool | none | `MISE_TASK_REMOTE_NO_CACHE` | Always fetch latest remote tasks |
 | `task.source_freshness_hash_contents` | bool | `false` | `MISE_TASK_SOURCE_FRESHNESS_HASH_CONTENTS` | Use blake3 content hashing instead of mtime |
 | `task.source_freshness_equal_mtime_is_fresh` | bool | `false` | `MISE_TASK_SOURCE_FRESHNESS_EQUAL_MTIME_IS_FRESH` | Equal mtime = fresh |
-| `task.disable_spec_from_run_scripts` | bool | `false` | `MISE_TASK_DISABLE_SPEC_FROM_RUN_SCRIPTS` | Exclude template functions from usage spec (early opt-out before 2026.11.0 removal) |
+| `task.disable_spec_from_run_scripts` | bool | `false` | `MISE_TASK_DISABLE_SPEC_FROM_RUN_SCRIPTS` | Exclude template functions from usage spec (early opt-out before 2027.5.0 removal) |
 | `task.monorepo_depth` | int | `5` | `MISE_TASK_MONOREPO_DEPTH` | Subdirectory depth for monorepo discovery |
 | `task.monorepo_exclude_dirs` | string[] | `[]` | `MISE_TASK_MONOREPO_EXCLUDE_DIRS` | Custom replaces defaults (`node_modules`, `target`, `dist`, `build`) |
 | `task.monorepo_respect_gitignore` | bool | `true` | `MISE_TASK_MONOREPO_RESPECT_GITIGNORE` | Honor `.gitignore` in monorepo discovery |
@@ -2430,7 +2430,7 @@ monorepo_respect_gitignore = true
 
 - Use `$1`, `$2`, `$@`, `$*` for arguments
 - Use `$args` in PowerShell
-- Use inline template functions `{{arg()}}`/`{{option()}}`/`{{flag()}}` in run scripts (deprecated, removed 2026.11)
+- Use inline template functions `{{arg()}}`/`{{option()}}`/`{{flag()}}` in run scripts (deprecated, removed 2027.5.0)
 - Forget to quote glob patterns in sources
 - Set env vars in `env` that deps need (they don't inherit — use structured `depends` with `env`)
 - Use `raw = true` unless interactive input needed (forces single-threaded, bypasses redactions)

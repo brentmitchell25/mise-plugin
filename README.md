@@ -12,6 +12,7 @@
   - [Dev Tool Setup](#4-dev-tool-setup)
   - [Environment Configuration](#5-environment-configuration)
   - [Hooks and Watchers](#6-hooks-and-watchers)
+  - [New Developer Machine Setup](#7-new-developer-machine-setup)
 - [Advanced Examples](#advanced-examples)
   - [Multi-Environment Terraform Deployment](#1-multi-environment-terraform-deployment-with-dynamic-completions)
   - [Dockerized Microservice Pipeline](#2-dockerized-microservice-build-pipeline-with-caching)
@@ -33,9 +34,10 @@ A Claude Code plugin that teaches Claude how to work with [mise](https://mise.jd
 When installed, Claude will:
 - Use the `usage` field for all task arguments (never shell-native `$1`/`$@` patterns)
 - Generate correct TOML-based and file-based tasks with proper configuration
-- Configure dev tools across 18 backends (aqua, github, npm, cargo, pipx, etc.)
+- Configure dev tools across 19 backends (aqua, github, npm, cargo, pipx, pkgx, etc.)
 - Set up environment variables, profiles, dotenv loading, and secrets
 - Create hooks and file watchers
+- Provision whole machines with `mise bootstrap` (system packages, dotfiles, macOS defaults, services)
 - Follow mise best practices throughout
 
 This plugin is a pure skill — no commands, hooks, or MCP servers. It activates automatically whenever you work with mise.
@@ -51,7 +53,7 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 - **New features** — `extends` (task inheritance), `timeout`, structured `run`/`depends` with args/env
 
 ### Dev Tools
-- **18 backends** — aqua, github, gitlab, forgejo, http, s3, pipx, npm, go, cargo, gem, dotnet, conda, spm, vfox, asdf
+- **19 backends** — aqua, github, gitlab, forgejo, http, s3, pipx, npm, go, cargo, gem, dotnet, conda, spm, pkgx, vfox, asdf
 - **Per-tool options** — version, OS restriction, postinstall commands
 - **Shims and aliases** — shell integration, tool aliasing, version aliasing
 
@@ -66,6 +68,10 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 - **File watchers** — watch patterns with automatic re-execution
 - **Settings** — 100+ configuration options with env var overrides
 - **Hierarchical config** — file precedence, merge behavior, profiles
+
+### Machine Setup
+- **`mise bootstrap`** — declarative end-to-end machine/developer setup: system packages (apt/dnf/pacman/apk/brew/brew-cask/mas), macOS defaults, launchd/systemd services, login shell, tools, and a `bootstrap` task
+- **Declarative dotfiles** — `[dotfiles]` with symlink/symlink-each/copy/template modes, glob wildcards, and block/line edits
 
 ## Installation
 
@@ -198,6 +204,29 @@ postinstall = "echo 'Tools installed successfully'"
 patterns = ["src/**/*.rs"]
 run = "cargo fmt"
 ```
+
+### 7. New developer machine setup
+
+Ask Claude: *"Set up mise bootstrap so a new developer can provision everything with one command"*
+
+```toml
+[bootstrap.packages]
+"apt:build-essential" = "latest"
+"brew-cask:visual-studio-code" = "latest"
+
+[dotfiles]
+"~/.gitconfig" = "dotfiles/gitconfig"
+"~/.zshrc/activate" = { block = 'eval "$(mise activate zsh)"' }
+
+[tools]
+node = "lts"
+python = "3.12"
+
+[tasks.bootstrap]
+run = "gh auth status || gh auth login"
+```
+
+Then run `mise bootstrap` (add `--dry-run` to preview, `--yes` to skip prompts).
 
 ## Advanced Examples
 
@@ -542,9 +571,10 @@ The skill provides Claude with comprehensive knowledge of:
 |------|---------|
 | **Tasks** | All fields (run, depends, sources, outputs, usage, extends, timeout, etc.), structured run/depends, file tasks, remote tasks |
 | **Usage Spec** | Full arg/flag/complete reference with all attributes, env var access patterns, bash expansion |
-| **Dev Tools** | 18 backends, per-tool options, version formats, backend-specific config (github, http, cargo, pipx, etc.) |
+| **Dev Tools** | 19 backends, per-tool options, version formats, backend-specific config (github, http, cargo, pipx, pkgx, etc.) |
 | **Environments** | env vars, _.path/_.file/_.source directives, profiles, required/redacted vars, templates |
 | **Hooks** | cd/enter/leave/preinstall/postinstall hooks, file watchers |
+| **Machine Bootstrap** | `mise bootstrap` (system packages, macOS defaults, services, login shell), declarative `[dotfiles]` |
 | **Configuration** | File hierarchy, 100+ settings, merge behavior, minimum version |
 | **Best Practices** | DO/DON'T patterns, complete examples, common gotchas |
 
