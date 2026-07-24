@@ -13,6 +13,7 @@
   - [Environment Configuration](#5-environment-configuration)
   - [Hooks and Watchers](#6-hooks-and-watchers)
   - [New Developer Machine Setup](#7-new-developer-machine-setup)
+  - [Sandboxing Untrusted Tasks](#8-sandboxing-untrusted-tasks)
 - [Advanced Examples](#advanced-examples)
   - [Multi-Environment Terraform Deployment](#1-multi-environment-terraform-deployment-with-dynamic-completions)
   - [Dockerized Microservice Pipeline](#2-dockerized-microservice-build-pipeline-with-caching)
@@ -34,11 +35,12 @@ A Claude Code plugin that teaches Claude how to work with [mise](https://mise.jd
 When installed, Claude will:
 - Use the `usage` field for all task arguments (never shell-native `$1`/`$@` patterns)
 - Generate correct TOML-based and file-based tasks with proper configuration
-- Configure dev tools across 19 backends (aqua, github, npm, cargo, pipx, pkgx, etc.)
+- Configure dev tools across 18 backends (aqua, github, npm, cargo, pipx, pkgx, etc.)
 - Set up environment variables, profiles, dotenv loading, and secrets
 - Create hooks and file watchers
-- Provision whole machines with `mise bootstrap` (system packages, dotfiles, macOS defaults, services)
-- Follow mise best practices throughout
+- Sandbox risky tasks and read untrusted configs safely (`MISE_SAFE=1`)
+- Provision whole machines with `mise bootstrap` (system packages, git repos, dotfiles, macOS defaults, services)
+- Follow mise best practices throughout — including avoiding the handful of usage-spec attributes that are documented upstream but don't actually parse
 
 This plugin is a pure skill — no commands, hooks, or MCP servers. It activates automatically whenever you work with mise.
 
@@ -50,11 +52,13 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 - **Complete usage spec** — positional args, flags, choices, custom completions, variadic args, defaults, env binding
 - **Task dependencies** — `depends`, `depends_post`, `wait_for` with parallel execution
 - **Caching** — `sources`/`outputs` for rebuild avoidance, including `auto` mode
-- **New features** — `extends` (task inheritance), `timeout`, structured `run`/`depends` with args/env
+- **Task templates** — `[task_templates]` + `extends` with documented override/deep-merge rules
+- **Per-task output control** — `output` style field, `timeout`, structured `run`/`depends` with args/env
 
 ### Dev Tools
-- **19 backends** — aqua, github, gitlab, forgejo, http, s3, pipx, npm, go, cargo, gem, dotnet, conda, spm, pkgx, vfox, asdf
-- **Per-tool options** — version, OS restriction, postinstall commands
+- **18 backends** — aqua, github, gitlab, forgejo, http, s3, pipx, npm, go, cargo, gem, dotnet, conda, spm, pkgx, vfox, asdf, ubi (deprecated)
+- **Per-tool options** — version, OS restriction, postinstall commands, install env
+- **Lockfiles** — `mise.lock`, `--locked` CI enforcement, `mise lock --bump`, `minimum_release_age`
 - **Shims and aliases** — shell integration, tool aliasing, version aliasing
 
 ### Environments
@@ -68,10 +72,18 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 - **File watchers** — watch patterns with automatic re-execution
 - **Settings** — 100+ configuration options with env var overrides
 - **Hierarchical config** — file precedence, merge behavior, profiles
+- **Deprecation calendar** — every dated removal and default flip in one table
+
+### Security
+- **Sandboxing** — `[settings.sandbox]` plus per-task `deny_*`/`allow_*` fields and matching CLI flags
+- **Safe mode** — `MISE_SAFE=1` turns mise into an inert config reader for untrusted repos and fork PRs
+- **Trust** — auto-trust rules, safe-config auto-load, git-worktree trust inheritance
+- **Supply chain** — cosign/SLSA/attestation/minisign verification, `minimum_release_age`
 
 ### Machine Setup
-- **`mise bootstrap`** — declarative end-to-end machine/developer setup: system packages (apt/dnf/pacman/apk/brew/brew-cask/mas), macOS defaults, launchd/systemd services, login shell, tools, and a `bootstrap` task
+- **`mise bootstrap`** — declarative end-to-end machine/developer setup: vfox plugins, system packages (apt/dnf/pacman/apk/brew/brew-cask/flatpak/mas), git repos, shell activation, macOS defaults, launchd/systemd services and timers, login shell, tools, and a `bootstrap` task
 - **Declarative dotfiles** — `[dotfiles]` with symlink/symlink-each/copy/template modes, glob wildcards, and block/line edits
+- **OCI images** — `mise oci build/push/run` with a built-in registry client and `[[oci.copy]]` layers
 
 ## Installation
 
@@ -179,9 +191,6 @@ DATABASE_URL = { required = "Set postgres connection string" }
 API_KEY = { value = "{{env.API_KEY}}", redact = true }
 _.path = ["./node_modules/.bin", "{{config_root}}/scripts"]
 _.file = [".env", ".env.local"]
-
-[settings]
-env_shell_expand = true
 ```
 
 ```toml
@@ -214,6 +223,13 @@ Ask Claude: *"Set up mise bootstrap so a new developer can provision everything 
 "apt:build-essential" = "latest"
 "brew-cask:visual-studio-code" = "latest"
 
+[bootstrap.repos]
+"~/src/dotfiles" = { url = "git@github.com:myorg/dotfiles.git", ref = "main" }
+
+[bootstrap.mise_shell_activate]
+zprofile = "shims"
+zshrc = "activate"
+
 [dotfiles]
 "~/.gitconfig" = "dotfiles/gitconfig"
 "~/.zshrc/activate" = { block = 'eval "$(mise activate zsh)"' }
@@ -226,7 +242,31 @@ python = "3.12"
 run = "gh auth status || gh auth login"
 ```
 
-Then run `mise bootstrap` (add `--dry-run` to preview, `--yes` to skip prompts).
+Then run `mise bootstrap` (add `--dry-run` to preview, `--yes` to skip prompts, `--only`/`--skip` to run a subset). Stable since mise 2026.7.4 — no longer needs `MISE_EXPERIMENTAL`.
+
+### 8. Sandboxing untrusted tasks
+
+Ask Claude: *"Lock down this dependency-install task so it can only reach the npm registry"*
+
+```toml
+[tasks.fetch-deps]
+description = "Install dependencies with no ambient access"
+deny_all = true
+allow_net = ["registry.npmjs.org"]
+allow_read = ["{{config_root}}"]
+allow_write = ["{{config_root}}/node_modules"]
+run = "npm ci"
+```
+
+Or set a deny-by-default policy for the whole project and open access per task:
+
+```toml
+[settings.sandbox]
+deny_net = true
+deny_write = true
+```
+
+For configs you don't control (fork PRs, third-party repos), `MISE_SAFE=1` makes mise refuse to run hooks, tasks, `_.source`, and template `exec()` entirely — so it can read tool versions without executing anything.
 
 ## Advanced Examples
 
@@ -569,13 +609,16 @@ The skill provides Claude with comprehensive knowledge of:
 
 | Area | Details |
 |------|---------|
-| **Tasks** | All fields (run, depends, sources, outputs, usage, extends, timeout, etc.), structured run/depends, file tasks, remote tasks |
-| **Usage Spec** | Full arg/flag/complete reference with all attributes, env var access patterns, bash expansion |
-| **Dev Tools** | 19 backends, per-tool options, version formats, backend-specific config (github, http, cargo, pipx, pkgx, etc.) |
-| **Environments** | env vars, _.path/_.file/_.source directives, profiles, required/redacted vars, templates |
+| **Tasks** | All fields (run, depends, sources, outputs, usage, extends, timeout, output, sandbox, etc.), structured run/depends, `[task_templates]`, file tasks, remote tasks |
+| **Usage Spec** | Full arg/flag/cmd/complete reference with all attributes, env var access patterns, bash expansion — plus the attributes that are documented upstream but hard-error |
+| **Dev Tools** | 18 backends, per-tool options, version formats, backend-specific config (github, http, s3, cargo, pipx, pkgx, etc.), lockfiles |
+| **Environments** | env vars, _.path/_.file/_.source/_.python.venv directives, profiles, required/redacted vars, secrets, Tera v2 templates |
 | **Hooks** | cd/enter/leave/preinstall/postinstall hooks, file watchers |
-| **Machine Bootstrap** | `mise bootstrap` (system packages, macOS defaults, services, login shell), declarative `[dotfiles]` |
-| **Configuration** | File hierarchy, 100+ settings, merge behavior, minimum version |
+| **Security** | `[settings.sandbox]`, per-task deny/allow fields, `MISE_SAFE=1`, trust rules, supply-chain verification |
+| **Machine Bootstrap** | `mise bootstrap` (plugins, packages, repos, shell activation, macOS defaults, services/timers, login shell), declarative `[dotfiles]`, OCI images |
+| **Dependencies** | `[deps]` providers (npm, uv, poetry, go, bundler, …) and `mise deps` |
+| **Monorepos** | `monorepo_root`, `[monorepo].config_roots`, `//path:task` syntax, root lockfiles |
+| **Configuration** | File hierarchy, 100+ settings, merge behavior, minimum version, deprecation calendar |
 | **Best Practices** | DO/DON'T patterns, complete examples, common gotchas |
 
 ## Requirements
@@ -597,7 +640,7 @@ This repo includes a Claude Code slash command for updating the skill as mise do
 /update-skill    # Re-crawl mise docs and update SKILL.md
 ```
 
-The command launches 5 parallel research agents to crawl the latest mise documentation, then consolidates findings into `skills/mise/SKILL.md`. Additional mise tasks handle versioning and validation:
+The command launches 6 parallel research agents — 5 documentation crawlers plus a release-notes auditor that diffs `jdx/mise` and `jdx/usage` releases since the last update — then consolidates findings into `skills/mise/SKILL.md`. Release notes take precedence over the doc pages for experimental/stable status, renamed keys, and changed defaults, since the docs lag behind releases. Additional mise tasks handle versioning and validation:
 
 ```bash
 mise run lint              # Validate skill file structure
