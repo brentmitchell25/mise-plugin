@@ -83,8 +83,25 @@ for section in "STRICT ENFORCEMENT" "Overview" "Task Definition" "Usage Spec" "T
   fi
 done
 
-# Check for blocked patterns in examples
-if grep -n '\$1\|\$2\|\$@\|\$\*' "$skill" | grep -v "BLOCKED\|DON'T\|❌\|Never\|never\|shell-native"; then
+# Check for blocked patterns in examples.
+#
+# The skill deliberately shows $1/$@ etc. in its "BLOCKED Patterns" and "DON'T"
+# reference sections, so a plain line-based grep false-positives on them (the
+# marker sits on a *preceding* line, not the offending one). Skip those whole
+# sections instead, and track code fences so TOML comments like "# Execution"
+# aren't mistaken for markdown headings.
+violations=$(awk '
+  /^```/                         { fence = !fence; next }
+  !fence && /^#+[[:space:]]/     { skip = ($0 ~ /BLOCKED|DON.T|Never/) ? 1 : 0 }
+  skip                           { next }
+  /\$1|\$2|\$@|\$\*/ {
+    if ($0 ~ /BLOCKED|DON.T|Never|never|shell-native/) next
+    printf "%d:%s\n", NR, $0
+  }
+' "$skill")
+
+if [ -n "$violations" ]; then
+  echo "$violations"
   echo "WARNING: Found potentially unblocked shell-native arg patterns"
 fi
 
