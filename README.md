@@ -14,6 +14,8 @@
   - [Hooks and Watchers](#6-hooks-and-watchers)
   - [New Developer Machine Setup](#7-new-developer-machine-setup)
   - [Sandboxing Untrusted Tasks](#8-sandboxing-untrusted-tasks)
+  - [Task Output Caching](#9-task-output-caching)
+  - [Monorepo Affected-Task Selection](#10-monorepo-affected-task-selection)
 - [Advanced Examples](#advanced-examples)
   - [Multi-Environment Terraform Deployment](#1-multi-environment-terraform-deployment-with-dynamic-completions)
   - [Dockerized Microservice Pipeline](#2-dockerized-microservice-build-pipeline-with-caching)
@@ -36,10 +38,12 @@ When installed, Claude will:
 - Use the `usage` field for all task arguments (never shell-native `$1`/`$@` patterns)
 - Generate correct TOML-based and file-based tasks with proper configuration
 - Configure dev tools across 18 backends (aqua, github, npm, cargo, pipx, pkgx, etc.)
-- Set up environment variables, profiles, dotenv loading, and secrets
+- Set up environment variables, configuration environments, dotenv loading, and secrets
 - Create hooks and file watchers
+- Cache task outputs and replay logs instead of rebuilding (local and remote)
+- Wire up monorepos — workspace project graphs and `mise run --affected` in CI
 - Sandbox risky tasks and read untrusted configs safely (`MISE_SAFE=1`)
-- Provision whole machines with `mise bootstrap` (system packages, git repos, dotfiles, macOS defaults, services)
+- Provision whole machines with `mise bootstrap` (system packages, users, files, services, firewall, git repos, dotfiles, macOS defaults)
 - Follow mise best practices throughout — including avoiding the handful of usage-spec attributes that are documented upstream but don't actually parse
 
 This plugin is a pure skill — no commands, hooks, or MCP servers. It activates automatically whenever you work with mise.
@@ -50,28 +54,30 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 - **Strict `usage` field enforcement** — all arguments use mise's cross-platform usage spec
 - **TOML and file-based tasks** — inline tasks and executable scripts with `#MISE`/`#USAGE` headers
 - **Complete usage spec** — positional args, flags, choices, custom completions, variadic args, defaults, env binding
-- **Task dependencies** — `depends`, `depends_post`, `wait_for` with parallel execution
-- **Caching** — `sources`/`outputs` for rebuild avoidance, including `auto` mode
+- **Task dependencies** — `depends`, `depends_post`, `wait_for` with parallel execution and `optional` globs
+- **Freshness** — `sources`/`outputs` with `!` exclusions and brace globs, including `auto` mode
+- **Output caching** — `cache = { enabled = true }` restores artifacts and replays logs; `outputs = []` result-only caching; local and remote stores
 - **Task templates** — `[task_templates]` + `extends` with documented override/deep-merge rules
 - **Per-task output control** — `output` style field, `timeout`, structured `run`/`depends` with args/env
 
 ### Dev Tools
 - **18 backends** — aqua, github, gitlab, forgejo, http, s3, pipx, npm, go, cargo, gem, dotnet, conda, spm, pkgx, vfox, asdf, ubi (deprecated)
-- **Per-tool options** — version, OS restriction, postinstall commands, install env
-- **Lockfiles** — `mise.lock`, `--locked` CI enforcement, `mise lock --bump`, `minimum_release_age`
+- **Per-tool options** — version, OS restriction, postinstall commands, install env, `additional_asset_patterns`, table-form `rename_exe`
+- **Lockfiles** — `mise.lock`, `--locked` CI enforcement, `mise lock --bump`, `minimum_release_age` (defaults to `24h`)
 - **Shims and aliases** — shell integration, tool aliasing, version aliasing
 
 ### Environments
-- **Environment variables** — basic, required, redacted, lazy evaluation
-- **Special directives** — `_.path`, `_.file`, `_.source` for PATH, dotenv, and script sourcing
-- **Profiles** — `MISE_ENV`-based environment-specific configuration
-- **Templates** — Tera templating with functions, filters, and path operations
+- **Environment variables** — basic, required, redacted (and `redact = false` opt-outs), lazy evaluation
+- **Special directives** — `_.path`, `_.file` (with `expand`), `_.source`, `_.python.venv`
+- **Configuration environments** — `MISE_ENV`, `.miserc.toml`, platform auto-envs
+- **Templates** — Tera v2 templating with functions, filters, tests, and a v1 → v2 migration table
 
 ### Configuration
 - **Hooks** — cd, enter, leave, preinstall, postinstall triggers
 - **File watchers** — watch patterns with automatic re-execution
-- **Settings** — 100+ configuration options with env var overrides
-- **Hierarchical config** — file precedence, merge behavior, profiles
+- **Settings** — all 272 configuration options with types, defaults, and env var overrides
+- **Hierarchical config** — file precedence, merge behavior, configuration environments
+- **Monorepos** — workspace project graphs (Cargo/uv/Go/Node), `[monorepo.task_defaults]`, `^task` upstream deps, `mise run --affected`
 - **Deprecation calendar** — every dated removal and default flip in one table
 
 ### Security
@@ -81,8 +87,8 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 - **Supply chain** — cosign/SLSA/attestation/minisign verification, `minimum_release_age`
 
 ### Machine Setup
-- **`mise bootstrap`** — declarative end-to-end machine/developer setup: vfox plugins, system packages (apt/dnf/pacman/apk/brew/brew-cask/flatpak/mas), git repos, shell activation, macOS defaults, launchd/systemd services and timers, login shell, tools, and a `bootstrap` task
-- **Declarative dotfiles** — `[dotfiles]` with symlink/symlink-each/copy/template modes, glob wildcards, and block/line edits
+- **`mise bootstrap`** — declarative end-to-end machine/developer setup across 17 ordered steps: Linux users/groups, vfox plugins, system packages (apt/dnf/pacman/apk/brew/brew-cask/flatpak/mas), privileged files, system services, firewall rules, Docker Compose projects, git repos, shell activation, macOS defaults, launchd/systemd services and timers, login shell, tools, and a `bootstrap` task
+- **Declarative dotfiles** — `mise bootstrap dotfiles` with symlink/symlink-each/copy/template modes, glob wildcards, `exclude` patterns, block/line edits, and `unapply`
 - **OCI images** — `mise oci build/push/run` with a built-in registry client and `[[oci.copy]]` layers
 
 ## Installation
@@ -267,6 +273,77 @@ deny_write = true
 ```
 
 For configs you don't control (fork PRs, third-party repos), `MISE_SAFE=1` makes mise refuse to run hooks, tasks, `_.source`, and template `exec()` entirely — so it can read tool versions without executing anything.
+
+### 9. Task output caching
+
+Ask Claude: *"Make my build and lint tasks reuse cached results instead of re-running when nothing changed"*
+
+```toml
+[settings]
+experimental = true
+
+[task_config]
+global_inputs = ["mise.toml", "@group:lockfiles"]
+
+[task_config.input_groups]
+lockfiles = ["package-lock.json", "pnpm-lock.yaml"]
+
+[tasks.build]
+run = "tsc --build"
+sources = ["src/**/*.ts", "!src/**/*.test.ts", "tsconfig.json"]
+outputs = ["dist/**"]
+cache = { enabled = true, command_inputs = ["tsc --version"] }
+
+[tasks.lint]
+run = "eslint src/"
+sources = ["src/**/*.ts", ".eslintrc.*"]
+outputs = []                      # result-only: caches success + replayable logs, no archive
+cache = { enabled = true, env = ["CI"] }
+pass_through_env = ["GITHUB_TOKEN"]   # available to the command, not part of the cache key
+```
+
+Unlike `sources`/`outputs` freshness — which only *skips* a task — the cache restores declared outputs and replays stdout/stderr from a content-addressed archive. Inspect and control it:
+
+```bash
+mise run --task-cache-explain build   # what went into the key (never prints secret-derived hashes)
+mise run --task-cache off build       # read-write | read-only | write-only | off | local-only
+mise cache task build --json          # stored size, restorable bytes, time saved
+mise cache clear --task build         # leaves working-tree outputs alone
+```
+
+### 10. Monorepo affected-task selection
+
+Ask Claude: *"Only run tests for packages my branch actually touched"*
+
+```toml
+# Root mise.toml
+monorepo_root = true
+
+[settings]
+experimental = true
+task.auto_infer = ["node"]        # package.json scripts become tasks, no per-package mise.toml
+
+[monorepo]
+config_roots = ["packages/*", "services/*"]
+
+[monorepo.task_defaults.build]
+sources = ["src/**", "package.json"]
+outputs = ["dist/**"]
+cache = { enabled = true }
+depends = ["^build"]              # build every upstream package first, transitively
+
+[monorepo.task_defaults.test]
+env = { NODE_ENV = "test" }
+```
+
+```bash
+mise run --affected test                              # only projects touched by the diff
+mise run --affected --affected-base origin/main test  # plus their reverse dependencies
+mise run --affected --affected-explain --dry-run test # why each task was selected
+mise tasks graph --explain                            # inferred projects, edges, and provenance
+```
+
+mise infers the project graph from Cargo, uv, Go, and Node workspaces **without the toolchain installed**, and auto-detects base/head revisions on GitHub Actions and GitLab.
 
 ## Advanced Examples
 
@@ -609,16 +686,17 @@ The skill provides Claude with comprehensive knowledge of:
 
 | Area | Details |
 |------|---------|
-| **Tasks** | All fields (run, depends, sources, outputs, usage, extends, timeout, output, sandbox, etc.), structured run/depends, `[task_templates]`, file tasks, remote tasks |
-| **Usage Spec** | Full arg/flag/cmd/complete reference with all attributes, env var access patterns, bash expansion — plus the attributes that are documented upstream but hard-error |
-| **Dev Tools** | 18 backends, per-tool options, version formats, backend-specific config (github, http, s3, cargo, pipx, pkgx, etc.), lockfiles |
-| **Environments** | env vars, _.path/_.file/_.source/_.python.venv directives, profiles, required/redacted vars, secrets, Tera v2 templates |
+| **Tasks** | All fields (run, depends, sources, outputs, cache, usage, extends, timeout, output, pass_through_env, sandbox, etc.), structured run/depends, `[task_templates]`, file tasks, remote tasks |
+| **Usage Spec** | Full arg/flag/cmd/complete reference with all attributes, `effect=`, env var access patterns, bash expansion — plus the attributes that are documented upstream but hard-error |
+| **Task Caching** | `cache = {}`, result-only `outputs = []`, `input_groups`/`@group:` refs, `global_inputs`, `command_inputs`, `--task-cache` modes, `mise cache task`, remote cache settings |
+| **Dev Tools** | 18 backends, per-tool options, version formats, backend-specific config (github, http, s3, cargo, pipx, npm, pkgx, etc.), lockfiles, provenance |
+| **Environments** | env vars, `_.path`/`_.file`/`_.source`/`_.python.venv` directives, configuration environments, `.miserc.toml`, required/redacted vars, secrets (fnox/sops/age), Tera v2 templates |
 | **Hooks** | cd/enter/leave/preinstall/postinstall hooks, file watchers |
-| **Security** | `[settings.sandbox]`, per-task deny/allow fields, `MISE_SAFE=1`, trust rules, supply-chain verification |
-| **Machine Bootstrap** | `mise bootstrap` (plugins, packages, repos, shell activation, macOS defaults, services/timers, login shell), declarative `[dotfiles]`, OCI images |
+| **Security** | `[settings.sandbox]`, per-task deny/allow fields, `MISE_SAFE=1`, paranoid mode, trust rules, supply-chain verification |
+| **Machine Bootstrap** | `mise bootstrap` (17 steps: accounts, plugins, packages, files, services, firewall, compose, repos, shell activation, macOS defaults, services/timers, login shell), `mise bootstrap dotfiles`, OCI images |
 | **Dependencies** | `[deps]` providers (npm, uv, poetry, go, bundler, …) and `mise deps` |
-| **Monorepos** | `monorepo_root`, `[monorepo].config_roots`, `//path:task` syntax, root lockfiles |
-| **Configuration** | File hierarchy, 100+ settings, merge behavior, minimum version, deprecation calendar |
+| **Monorepos** | `monorepo_root`, `[monorepo].config_roots`, `//path:task` syntax, workspace project graph (Cargo/uv/Go/Node), `[monorepo.task_defaults]`, `^task` upstream deps, `mise run --affected`, root lockfiles |
+| **Configuration** | File hierarchy, all 272 settings, merge behavior, minimum version, deprecation calendar |
 | **Best Practices** | DO/DON'T patterns, complete examples, common gotchas |
 
 ## Requirements
