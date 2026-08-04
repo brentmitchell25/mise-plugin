@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "mise",
-      "description": "Use when working with mise - creating/editing mise.toml or .mise.toml files, defining tasks with usage field arguments, managing dev tools and environments, configuring hooks, or when user mentions mise configuration.",
+      "description": "Use when working with mise - creating/editing mise.toml or .mise.toml files, defining tasks with usage field arguments, managing dev tools and environments, configuring hooks, task caching, sandboxing, machine bootstrap, monorepo workspaces, or when user mentions mise configuration.",
       "source": "./",
       "category": "development",
       "keywords": [
@@ -23,7 +23,7 @@
         "build-system",
         "developer-environment"
       ],
-      "version": "2.7.0"
+      "version": "2.8.0"
     }
   ]
 }
