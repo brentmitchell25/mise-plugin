@@ -1,7 +1,7 @@
 {
   "name": "mise",
-  "version": "2.8.0",
-  "description": "Comprehensive mise skill for Claude Code covering the full mise ecosystem: task definition with usage spec arguments, task output caching, dev tool management across 18 backends, environment configuration, hooks, monorepo workspaces, sandboxing, machine bootstrap, and 272 settings.",
+  "version": "2.9.0",
+  "description": "Comprehensive mise skill for Claude Code covering the full mise ecosystem: task definition with usage spec v6 arguments, task output caching and the Rust action cache, dev tool management across 19 backends, environment configuration, hooks, monorepo workspaces, sandboxing, machine bootstrap including remote SSH provisioning, and 287 settings.",
   "author": {
     "name": "Brent Mitchell"
   },
