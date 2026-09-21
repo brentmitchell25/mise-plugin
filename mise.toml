@@ -7,15 +7,125 @@
 skill_path = "skills/mise/SKILL.md"
 
 [tasks."update:readme"]
-description = "Regenerate README.md with updated examples from SKILL.md"
+description = "Check README and plugin metadata for drift against live mise data"
+usage = '''
+flag "--offline" help="Skip fetching the mise JSON schema (schema checks are skipped)"
+flag "--schema <path>" help="Use a local schema file instead of fetching it"
+'''
 run = '''
 #!/usr/bin/env bash
-set -euo pipefail
-echo "Review SKILL.md for any new features, then update README.md:"
-echo "  - Add new use cases if new capabilities were added"
-echo "  - Update the 'What's Covered' table"
-echo "  - Ensure installation instructions are current"
-echo "  - Update advanced examples if new patterns emerged"
+# Verify the counts and examples the README / plugin metadata advertise still
+# match reality. Counts come from the live mise binary and the published JSON
+# schema, so this catches the drift that used to be found only by hand.
+set -uo pipefail   # deliberately not -e: collect every failure, then exit once
+
+readme="README.md"
+plugin=".claude-plugin/plugin.json"
+marketplace=".claude-plugin/marketplace.json"
+skill="{{vars.skill_path}}"
+fail=0
+
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
+bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; fail=1; }
+skip() { printf '  \033[33m–\033[0m %s\n' "$*"; }
+
+# Compare every "<N> <label>" number in a file against the expected value.
+check_count() {
+  local file="$1" pattern="$2" expected="$3" label="$4" claimed found=0
+  while read -r claimed; do
+    [ -z "$claimed" ] && continue
+    found=1
+    if [ "$claimed" = "$expected" ]; then
+      ok "$file: $label = $claimed"
+    else
+      bad "$file: claims $claimed $label, actual is $expected"
+    fi
+  done < <(grep -oE "$pattern" "$file" 2>/dev/null | grep -oE '[0-9]+' | sort -u)
+  [ "$found" = 1 ] || skip "$file: no $label count found"
+}
+
+# Flag a pattern that should no longer appear in a file.
+stale() {
+  local file="$1" pat="$2" why="$3"
+  if grep -qE "$pat" "$file" 2>/dev/null; then
+    bad "$file: $why"
+    grep -nE "$pat" "$file" | head -3 | sed 's/^/        /'
+  else
+    ok "$file: no $why"
+  fi
+}
+
+echo "Backends (from the installed mise binary)"
+if command -v mise >/dev/null 2>&1; then
+  n_backends=$(mise backends ls | grep -c .)
+  for f in "$readme" "$plugin" "$skill"; do
+    check_count "$f" '[0-9]+ backends' "$n_backends" "backends"
+  done
+else
+  skip "mise is not on PATH"
+fi
+
+echo
+echo "Schema-derived counts (mise.jdx.dev/schema/mise.json)"
+schema="${usage_schema:-}"
+if [ -z "$schema" ] && [ -z "${usage_offline:-}" ]; then
+  schema="$(mktemp)"
+  if ! curl -fsSL --max-time 20 https://mise.jdx.dev/schema/mise.json -o "$schema"; then
+    skip "could not fetch the schema (pass --offline or --schema <path>)"
+    schema=""
+  fi
+fi
+if [ -n "$schema" ] && [ -s "$schema" ]; then
+  n_settings=$(jq '[.["$defs"].settings | paths(type=="object" and has("description") and (has("properties")|not))] | length' "$schema")
+  n_ns=$(jq '[.["$defs"].settings.properties | to_entries[] | select(.value.properties != null)] | length' "$schema")
+  n_keys=$(jq '.properties | keys | length' "$schema")
+  for f in "$readme" "$plugin" "$skill"; do
+    check_count "$f" '[0-9]+ (configuration options|settings)' "$n_settings" "settings"
+  done
+  for f in "$readme" "$skill"; do
+    check_count "$f" '[0-9]+ namespaces|namespaces \([0-9]+\)' "$n_ns" "setting namespaces"
+  done
+  check_count "$skill" '\([0-9]+; authoritative' "$n_keys" "top-level config keys"
+else
+  skip "schema checks skipped"
+fi
+
+echo
+echo "Stale references"
+stale "$readme" 'rust_cache' "rust_cache (a deprecated no-op; should not be advertised)"
+stale "$plugin" 'rust_cache|Rust action cache' "Rust action cache (deprecated no-op)"
+stale "$readme" '"pipx:' 'a "pipx:" example (prefer the "pypi:" spelling)'
+
+echo
+echo "Metadata consistency"
+pv=$(jq -r '.version' "$plugin")
+mv=$(jq -r '.plugins[0].version' "$marketplace")
+if [ "$pv" = "$mv" ]; then
+  ok "plugin.json and marketplace.json agree on version $pv"
+else
+  bad "version mismatch: plugin.json=$pv marketplace.json=$mv"
+fi
+
+skill_desc=$(awk '/^description:/{sub(/^description: */,""); print; exit}' "$skill")
+mp_desc=$(jq -r '.plugins[0].description' "$marketplace")
+if [ "$skill_desc" = "$mp_desc" ]; then
+  ok "marketplace description matches the skill frontmatter"
+else
+  bad "marketplace plugin description has drifted from the skill frontmatter description"
+fi
+
+echo
+if [ "$fail" = 0 ]; then
+  echo "No drift detected."
+  echo
+  echo "Still worth a human pass after a skill update:"
+  echo "  - new use cases for capabilities added since the last release"
+  echo "  - the \"What's Covered\" table"
+  echo "  - advanced examples, if new patterns emerged"
+else
+  echo "Drift detected — fix the items marked ✗ above, then re-run."
+  exit 1
+fi
 '''
 
 [tasks."update:version"]
