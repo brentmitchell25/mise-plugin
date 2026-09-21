@@ -16,6 +16,8 @@
   - [Sandboxing Untrusted Tasks](#8-sandboxing-untrusted-tasks)
   - [Task Output Caching](#9-task-output-caching)
   - [Monorepo Affected-Task Selection](#10-monorepo-affected-task-selection)
+  - [Project Services as Task Prerequisites](#11-project-services-as-task-prerequisites)
+  - [Project Requirements Checks](#12-project-requirements-that-tool-versions-cant-express)
 - [Advanced Examples](#advanced-examples)
   - [Multi-Environment Terraform Deployment](#1-multi-environment-terraform-deployment-with-dynamic-completions)
   - [Dockerized Microservice Pipeline](#2-dockerized-microservice-build-pipeline-with-caching)
@@ -37,14 +39,17 @@ A Claude Code plugin that teaches Claude how to work with [mise](https://mise.jd
 When installed, Claude will:
 - Use the `usage` field for all task arguments (never shell-native `$1`/`$@` patterns)
 - Generate correct TOML-based and file-based tasks with proper configuration
-- Configure dev tools across 19 backends (aqua, github, npm, cargo, pipx, pkgx, etc.)
+- Configure dev tools across 20 backends (packslip, aqua, github, npm, cargo, pypi, pkgx, etc.)
 - Set up environment variables, configuration environments, dotenv loading, and secrets
 - Create hooks and file watchers
 - Cache task outputs and replay logs instead of rebuilding (local and remote)
+- Declare long-lived project services in `[daemons]` and make tasks wait on them
+- Encode project requirements as `[doctor.checks]` for `mise doctor project`
 - Wire up monorepos — workspace project graphs and `mise run --affected` in CI
 - Sandbox risky tasks and read untrusted configs safely (`MISE_SAFE=1`)
 - Provision whole machines with `mise bootstrap`, locally or over SSH (system packages, users, files, services, firewall, Docker Compose, git repos, dotfiles, macOS defaults)
-- Follow mise best practices throughout — including avoiding the usage-spec attributes that are feature-gated out of mise and fail at runtime
+- Track dotfiles in Git with `mise dot` — checkpoints, rollback, undo, and sharing
+- Follow mise best practices throughout — including avoiding the usage-spec attributes that are feature-gated out of mise and fail at runtime, and the fields that have quietly become no-ops
 
 This plugin is a pure skill — no commands, hooks, or MCP servers. It activates automatically whenever you work with mise.
 
@@ -56,15 +61,18 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 - **Complete usage spec v6** — positional args, flags, choices, custom completions, variadic args, defaults, env binding, plus `group`/`flagset`/`output` nodes and relationship attributes (`required_if`, `conflicts`, `requires`, `exclusive`)
 - **Task dependencies** — `depends`, `depends_post`, `wait_for` with parallel execution and `optional` globs
 - **Freshness** — `sources`/`outputs` with `!` exclusions and brace globs, including `auto` mode
-- **Output caching** — `cache = { enabled = true }` restores artifacts and replays logs; `outputs = []` result-only caching; local and remote stores; experimental Rust compiler action cache (`rust_cache`)
-- **Task templates** — `[task_templates]` + `extends` with documented override/deep-merge rules
+- **Output caching** — `cache = { enabled = true }` restores artifacts and replays logs; `outputs = []` result-only caching; local and remote stores
+- **Task templates** — `[task_templates]` + `extends` with documented override/deep-merge rules, and `usage` flags that **merge** rather than replace
+- **Daemon prerequisites** — `daemons = [...]` starts and waits for project services before the task body runs
 - **Per-task output control** — `output` style field, `timeout`, structured `run`/`depends` with args/env
 
 ### Dev Tools
-- **19 backends** — core, aqua, github, gitlab, forgejo, http, s3, pipx, npm, go, cargo, gem, dotnet, conda, spm, pkgx, vfox, asdf, ubi (deprecated)
-- **Per-tool options** — version, OS restriction, postinstall commands, install env, `additional_asset_patterns`, table-form `rename_exe`
-- **Lockfiles** — `mise.lock` (`lockfile_version = 1`), config-root-scoped `[tool_config] locked`, `mise lock --bump`/`--upgrade`, opt-in `minimum_release_age`
-- **Shims and aliases** — shell integration, tool aliasing, version aliasing
+- **20 backends** — core, packslip, aqua, github, gitlab, forgejo, http, s3, pypi (formerly pipx), npm, go, cargo, gem, dotnet, conda, spm, pkgx, vfox, asdf, ubi (deprecated)
+- **Packslip** — signed publisher manifests with SSH-style signer pinning, plus version-matched shell completions, man pages, and agent skills
+- **Per-tool options** — version, OS restriction (including `unix`), postinstall commands, install env, `additional_asset_patterns`, table-form `rename_exe`
+- **Lazy tools** — `lazy = true` generates a bootstrap shim and defers install until first invocation
+- **Lockfiles** — `mise.lock` **revision 2** with npm/Python dependency graphs in sidecars, config-root-scoped `[tool_config] locked`, `mise lock --bump`/`--upgrade`, and the built-in 24h `minimum_release_age`
+- **Shims and aliases** — shell integration, tool aliasing, version aliasing, `shims.exclude`, tool stubs
 
 ### Environments
 - **Environment variables** — basic, required, redacted (and `redact = false` opt-outs), lazy evaluation
@@ -72,26 +80,33 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 - **Configuration environments** — `MISE_ENV`, `.miserc.toml`, platform auto-envs
 - **Templates** — Tera v2 templating with functions, filters, tests, and a v1 → v2 migration table
 
+### Services and Diagnostics
+- **Project daemons** — `[daemons]` with PostgreSQL/Redis/CockroachDB/NATS/SpiceDB presets, custom `run`/`task` daemons, `[daemon_groups]`, cross-project references, and `port = "auto"` for running one stack across git worktrees
+- **Project diagnostics** — `[doctor.checks]` probes with `hint`, `timeout`, `dir`, `shell`, and `os` selectors for `mise doctor project`
+- **Command wrappers** — `[wrappers]` intercepts a command name before it reaches the active toolset
+
 ### Configuration
-- **Hooks** — cd, enter, leave, preinstall, postinstall triggers
+- **Hooks** — cd, enter, leave, preinstall, postinstall triggers, with exact per-hook env vars and cross-config precedence
 - **File watchers** — watch patterns with automatic re-execution
-- **Settings** — all 287 configuration options with types, defaults, and env var overrides
+- **Settings** — ~324 configuration options across 36 namespaces, with types, defaults, and env var overrides
 - **Hierarchical config** — file precedence, merge behavior, configuration environments
 - **Monorepos** — workspace project graphs (Cargo/uv/Go/Node), `[monorepo.task_defaults]`, `^task` upstream deps, `mise run --affected`
-- **Deprecation calendar** — every dated removal and default flip in one table
+- **Deprecation calendar** — every dated removal and default flip in one table, including fields that are already silent no-ops
 
 ### Security
 - **Sandboxing** — `[settings.sandbox]` plus per-task `deny_*`/`allow_*` fields and matching CLI flags
 - **Safe mode** — `MISE_SAFE=1` turns mise into an inert config reader for untrusted repos and fork PRs
 - **Trust** — auto-trust rules, safe-config auto-load, git-worktree trust inheritance
-- **Supply chain** — cosign/SLSA/attestation/minisign verification, `minimum_release_age`
+- **Supply chain** — cosign/SLSA/attestation/minisign verification, packslip signer pinning, and the built-in 24h `minimum_release_age`
 
 ### Machine Setup
-- **`mise bootstrap`** — declarative end-to-end machine/developer setup across 17 ordered steps: Linux users/groups, vfox plugins, system packages (apt/dnf/pacman/apk/brew/brew-cask/flatpak/flatpak-user/mas), privileged files, system services, firewall rules, Docker Compose projects, git repos, shell activation, macOS defaults, launchd/systemd services and timers, login shell, tools, and a `bootstrap` task
+- **`mise bootstrap`** — declarative end-to-end machine/developer setup across 17 ordered steps: Linux users/groups, vfox plugins, system packages (apt/dnf/pacman/apk/zypper/aur/brew/brew-cask/macos-app/mas/flatpak/nix/winget/scoop), privileged files, system services, firewall rules, Docker Compose projects, git repos, shell activation, macOS defaults, launchd/systemd services and timers, login shell, tools, and a `bootstrap` task
 - **Plan/apply workflow** — `mise bootstrap plan` with `--json` and `--detailed-exitcode`, plus per-resource `apply`/`status` subcommands that converge only on real drift
 - **Remote provisioning** — `mise bootstrap remote` applies the same project over SSH to a `[bootstrap.remote.hosts]` inventory or ad-hoc targets, detecting each host's OS/arch/libc and fetching a minisign-verified binary
-- **Declarative dotfiles** — `mise bootstrap dotfiles` with symlink/symlink-each/copy/template modes, inline `content`, glob wildcards, `exclude` patterns, block/line edits, and `unapply`
-- **OCI images** — `mise oci build/push/run` with a built-in registry client and `[[oci.copy]]` layers
+- **Declarative dotfiles** — `mise dot` / `mise bootstrap dotfiles` with symlink/symlink-each/copy/template modes, inline `content`, glob wildcards, `exclude` patterns, block/line edits, per-OS/profile `variants`, `encrypt`, and `unapply`
+- **Dotfiles history** — Git-backed checkpoints via `mise dot save`/`history`/`rollback`/`undo`, a background watcher service, and optional sharing through a setup repository
+- **Agent skills** — `mise skills ls`/`sync` links the version-matched `SKILL.md` bundles that `packslip:` tools publish into your agent's skills directory
+- **OCI images** — `mise oci build/push/run` with a built-in registry client and `[[oci.copy]]` layers, plus official `ghcr.io/jdx/mise` images
 
 ## Installation
 
@@ -184,7 +199,9 @@ node = "22"
 python = { version = "3.12", postinstall = "pip install -r requirements.txt" }
 "aqua:BurntSushi/ripgrep" = "latest"
 "npm:prettier" = "latest"
-"pipx:psf/black" = "latest"
+"pypi:psf/black" = "latest"
+"packslip:github.com/jdx/hk" = "latest"   # signed manifest + version-matched completions
+terraform = { version = "1.9", lazy = true }   # installs on first `terraform` invocation
 ```
 
 ### 5. Environment configuration
@@ -346,6 +363,66 @@ mise tasks graph --explain                            # inferred projects, edges
 ```
 
 mise infers the project graph from Cargo, uv, Go, and Node workspaces **without the toolchain installed**, and auto-detects base/head revisions on GitHub Actions and GitLab.
+
+### 11. Project services as task prerequisites
+
+Ask Claude: *"My tests need Postgres and Redis running. Set that up so `mise run test` just works."*
+
+```toml
+[settings]
+experimental = true
+
+[daemons]
+postgres = "18"
+redis = "8"
+
+[tasks.test]
+daemons = ["postgres", "redis"]   # started and waited for before the task body
+run = "npm test"
+```
+
+`mise run test` installs missing tools, starts both services, waits for pitchfork to report them ready, then runs the tests. Already-running daemons are reused, and they stay up between invocations. This replaces the usual "prerequisite task that launches a background process and polls for readiness" pattern.
+
+The presets export connection variables (`DATABASE_URL`, `PGPORT`, `REDIS_URL`, …) and keep data between runs. For several git worktrees sharing one stack, `port = "auto"` derives a distinct port per checkout so they don't collide:
+
+```toml
+[daemons.postgres]
+preset = "postgres"
+version = "18"
+port = "auto"        # primary checkout keeps 5432; linked worktrees get 5433+
+```
+
+```bash
+mise daemons start          # or `mise daemons start <group>`
+mise daemons ls --json      # resolved ports, including automatic allocation
+mise daemons logs postgres
+mise daemons stop
+```
+
+### 12. Project requirements that tool versions can't express
+
+Ask Claude: *"Add a check that fails with a useful hint if OpenSSL headers or the database aren't available."*
+
+```toml
+[doctor.checks.openssl]
+description = "OpenSSL development files are discoverable"
+run = "pkg-config --exists openssl"
+hint = "Run `mise bootstrap packages apply` to install the declared build dependencies."
+timeout = "5s"
+os = ["linux", "macos"]
+
+[doctor.checks.database]
+description = "PostgreSQL accepts connections"
+run = "pg_isready --quiet"
+hint = "Start the project's services with `mise daemons start postgres`."
+```
+
+```bash
+mise doctor project          # PASS/FAIL per check, with the hint on failure
+mise doctor project --json
+```
+
+Checks run concurrently, a failure never stops the others, and command output is captured and **discarded** — so a probe can't accidentally print a credential into the report. Explain the requirement with `description` and the remedy with `hint`. Ordinary `mise doctor` still diagnoses mise itself and never runs these.
 
 ## Advanced Examples
 
@@ -691,14 +768,17 @@ The skill provides Claude with comprehensive knowledge of:
 | **Tasks** | All fields (run, depends, sources, outputs, cache, usage, extends, timeout, output, pass_through_env, sandbox, etc.), structured run/depends, `[task_templates]`, file tasks, remote tasks |
 | **Usage Spec** | Full arg/flag/cmd/complete reference with all attributes, `effect=`, env var access patterns, bash expansion — plus the attributes that are documented upstream but hard-error |
 | **Task Caching** | `cache = {}`, result-only `outputs = []`, `input_groups`/`@group:` refs, `global_inputs`, `command_inputs`, `--task-cache` modes, `mise cache task`, remote cache settings |
-| **Dev Tools** | 19 backends, per-tool options, `version_order`, version formats, backend-specific config (github, http, s3, cargo, pipx, npm, pkgx, etc.), lockfiles, provenance |
+| **Dev Tools** | 20 backends, per-tool options, `lazy`/`lazy_bins`, `version_order`, version formats, backend-specific config (packslip, github, http, s3, cargo, pypi, npm, pkgx, etc.), tool stubs, lockfile revision 2, provenance |
+| **Daemons** | `[daemons]`, `[daemon_groups]`, `[daemons_settings]`, five service presets, custom `run`/`task` daemons, cross-project references, worktree-aware `port = "auto"`, task `daemons` prerequisites |
+| **Diagnostics** | `[doctor.checks]` fields, concurrency and output limits, `mise doctor project --json` |
 | **Environments** | env vars, `_.path`/`_.file`/`_.source`/`_.python.venv` directives, configuration environments, `.miserc.toml`, required/redacted vars, secrets (fnox/sops/age), Tera v2 templates |
-| **Hooks** | cd/enter/leave/preinstall/postinstall hooks, file watchers |
+| **Hooks** | cd/enter/leave/preinstall/postinstall hooks, exact per-hook env vars, cross-config precedence, file watchers |
+| **Wrappers** | `[wrappers]` command interception and `activate_shims` |
 | **Security** | `[settings.sandbox]`, per-task deny/allow fields, `MISE_SAFE=1`, paranoid mode, trust rules, supply-chain verification |
-| **Machine Bootstrap** | `mise bootstrap` (17 steps: accounts, plugins, packages, files, services, firewall, compose, repos, shell activation, macOS defaults, services/timers, login shell), `mise bootstrap dotfiles`, OCI images |
+| **Machine Bootstrap** | `mise bootstrap` (17 steps: accounts, plugins, packages, files, services, firewall, compose, repos, shell activation, macOS defaults, services/timers, login shell), 14 package managers, `mise dot` dotfiles + Git-backed history, agent skills, OCI images |
 | **Dependencies** | `[deps]` providers (npm, uv, poetry, go, bundler, …) and `mise deps` |
 | **Monorepos** | `monorepo_root`, `[monorepo].config_roots`, `//path:task` syntax, workspace project graph (Cargo/uv/Go/Node), `[monorepo.task_defaults]`, `^task` upstream deps, `mise run --affected`, root lockfiles |
-| **Configuration** | File hierarchy, all 287 settings, `conf.d` fragments, merge behavior, minimum version, deprecation calendar |
+| **Configuration** | File hierarchy, ~324 settings across 36 namespaces, `conf.d` fragments, merge behavior, minimum version, deprecation calendar |
 | **Best Practices** | DO/DON'T patterns, complete examples, common gotchas |
 
 ## Requirements
