@@ -1,6 +1,6 @@
 ---
 name: mise
-description: Use when working with mise - creating/editing mise.toml or .mise.toml files, defining tasks with usage field arguments, managing dev tools and environments, configuring hooks, task caching, sandboxing, machine bootstrap, monorepo workspaces, or when user mentions mise configuration.
+description: Use when working with mise - creating/editing mise.toml or .mise.toml files, defining tasks with usage field arguments, managing dev tools and environments, configuring hooks, task caching, sandboxing, project daemons, project diagnostics, command wrappers, machine bootstrap, dotfiles history, agent skills, monorepo workspaces, or when user mentions mise configuration.
 ---
 
 # Mise Comprehensive Skill
@@ -39,14 +39,16 @@ description: Use when working with mise - creating/editing mise.toml or .mise.to
   - [Local Artifact Cache](#local-artifact-cache)
   - [Cache Inputs](#cache-inputs)
   - [Remote Task Cache](#remote-task-cache)
-  - [Rust Compiler Action Cache](#rust-compiler-action-cache-experimental)
+  - [Rust Compiler Action Cache — REMOVED](#rust-compiler-action-cache--removed-rust_cache-is-a-no-op)
 - [Dev Tools Management](#dev-tools-management)
   - [Backends Overview](#backends-overview)
   - [TOML Syntax for Tools](#toml-syntax-for-tools)
   - [Per-Tool Options](#per-tool-options)
   - [Backend-Specific Configuration](#backend-specific-configuration)
+  - [Lazy Tools](#lazy-tools)
   - [Shims and Aliases](#shims-and-aliases)
   - [Shell Completion (per-directory tab-complete)](#shell-completion-per-directory-tab-complete)
+  - [Packslip, Man Pages, and Agent Skills](#packslip-man-pages-and-agent-skills)
   - [Lockfiles (mise.lock)](#lockfiles-miselock)
   - [Auto-Install Controls](#auto-install-controls)
   - [CLI Commands for Tools](#cli-commands-for-tools)
@@ -58,11 +60,20 @@ description: Use when working with mise - creating/editing mise.toml or .mise.to
   - [Secrets (fnox, SOPS, age)](#secrets-fnox-sops-age)
   - [Templates (Tera)](#templates-tera)
 - [Hooks and Watchers](#hooks-and-watchers)
+- [Project Daemons (`[daemons]`)](#project-daemons-daemons)
+  - [Declaring Daemons](#declaring-daemons)
+  - [Tasks That Require Daemons](#tasks-that-require-daemons)
+  - [Groups, Namespaces, and Cross-Project Daemons](#groups-namespaces-and-cross-project-daemons)
+  - [Service Presets](#service-presets)
+  - [Ports and Worktrees](#ports-and-worktrees)
+- [Project Diagnostics (`[doctor]`)](#project-diagnostics-doctor)
+- [Command Wrappers (`[wrappers]`)](#command-wrappers-wrappers)
 - [Sandboxing and Safe Mode](#sandboxing-and-safe-mode)
 - [Machine Bootstrap (Developer Setup)](#machine-bootstrap-developer-setup)
   - [`[bootstrap]` Configuration](#bootstrap-configuration)
   - [Remote Bootstrap over SSH (`[bootstrap.remote]`)](#remote-bootstrap-over-ssh-bootstrapremote)
   - [Declarative Dotfiles (`[dotfiles]`)](#declarative-dotfiles-dotfiles)
+  - [Dotfiles History (`mise dot` / `[history]`)](#dotfiles-history-mise-dot--history)
 - [OCI Container Images](#oci-container-images)
 - [Configuration and Settings](#configuration-and-settings)
   - [File Hierarchy](#file-hierarchy)
@@ -132,14 +143,21 @@ run = 'echo {{arg(name="x")}}'
 
 ## Overview
 
+> **Verified against mise 2026.9.12** (released 2026-09-20) and **usage 6.10.0**, using the live binary (`mise settings`, `mise --help`, `mise backends ls`), the published JSON schema (`https://mise.jdx.dev/schema/mise.json`), the docs site, and the `jdx/mise` release notes. Where docs and release notes disagree, release notes win.
+
 mise is an all-in-one developer environment tool that manages:
 
-- **Dev tools** — install and manage language runtimes, CLIs, and build tools (19 backends)
+- **Dev tools** — install and manage language runtimes, CLIs, and build tools (20 backends)
 - **Tasks** — project-specific commands with argument handling, dependencies, freshness checks, and output caching
 - **Environments** — manage env vars, configuration environments, dotenv files, secrets, age/sops-encrypted values
 - **Hooks** — run commands on directory changes, project enter/leave, tool install
+- **Daemons** — long-lived project services (databases, brokers, dev servers) supervised by pitchfork, startable as a task prerequisite
+- **Diagnostics** — project-defined `mise doctor project` checks for requirements tool versions can't express
+- **Wrappers** — intercept a command name before it reaches the active toolset
 - **Sandboxing** — restrict a task's filesystem/network/env access; `safe` mode for untrusted configs
 - **Machine bootstrap** — provision a whole dev machine, locally or over SSH (system packages, users/groups, privileged files, systemd services, Docker Compose, firewall, git repos, dotfiles, macOS defaults, login shell) via `mise bootstrap`
+- **Dotfiles history** — Git-backed checkpoints of tracked config files, with rollback, undo, and optional sharing
+- **Agent skills** — version-matched `SKILL.md` bundles published by `packslip:` tools, linked into an agent's skills directory
 - **Monorepos** — workspace project graph inference across Cargo/uv/Go/Node, affected-task selection
 - **OCI images** — build/push container images containing mise-managed tools
 
@@ -150,17 +168,21 @@ mise is an all-in-one developer environment tool that manages:
 - File watching (`mise watch` rebuilds on changes)
 - Cross-platform argument handling via `usage` spec
 - Hierarchical configuration with configuration-environment support
-- 19 tool backends (aqua, github, gitlab, forgejo, npm, cargo, pipx, etc.)
-- Security verification (cosign, SLSA, GitHub Attestations, minisign) — all native, no external CLIs
+- 20 tool backends (aqua, packslip, github, gitlab, forgejo, npm, cargo, pypi, etc.)
+- Security verification (cosign, SLSA, GitHub Attestations, minisign, packslip signer pinning) — all native, no external CLIs
 - Secret management (fnox, sops, age encryption)
 
-**Top-level `mise.toml` keys** (26; authoritative, from `https://mise.jdx.dev/schema/mise.json`):
-`_`, `alias` (deprecated), `bootstrap`, `deps`, `dotenv` (deprecated), `dotfiles`, `env`, `env_file` (deprecated),
-`env_path` (deprecated), `hooks`, `min_version`, `monorepo`, `monorepo_root`, `oci`, `plugins`, `redactions`,
-`settings`, `shell_alias`, `task_config`, `task_templates`, `tasks`, `tool_alias`, `tool_config`, `tools`, `vars`,
-`watch_files`.
+**Top-level `mise.toml` keys** (32; authoritative, from `https://mise.jdx.dev/schema/mise.json`):
+`_`, `alias` (deprecated), `bootstrap`, `daemon_groups`, `daemons`, `daemons_settings`, `deps`, `doctor`,
+`dotenv` (deprecated), `dotfiles`, `env`, `env_file` (deprecated), `env_path` (deprecated), `history`, `hooks`,
+`min_version`, `monorepo`, `monorepo_root`, `oci`, `plugins`, `redactions`, `settings`, `shell_alias`,
+`task_config`, `task_templates`, `tasks`, `tool_alias`, `tool_config`, `tools`, `vars`, `watch_files`, `wrappers`.
 
-> There is **no `[prepare]` key** — that feature is `[deps]`. See [Dependency Preparation](#dependency-preparation-deps).
+> **New since 2026.8.x:** `daemons` / `daemon_groups` / `daemons_settings` ([Project Daemons](#project-daemons-daemons)),
+> `doctor` ([Project Diagnostics](#project-diagnostics-doctor)), `wrappers` ([Command Wrappers](#command-wrappers-wrappers)),
+> and `history` ([Dotfiles History](#dotfiles-history-mise-dot--history)).
+
+> There is **no `[prepare]` key** — that feature is `[deps]` (the CLI accepts `mise prepare` as an alias for `mise deps`). See [Dependency Preparation](#dependency-preparation-deps).
 
 ---
 
@@ -239,7 +261,7 @@ Supported directories (searched by default):
 
 If `task_config.includes` is set, it **replaces** these defaults — list them explicitly to keep them. On name collision across includes, the **last entry wins**.
 
-**Supported `#MISE` directives:** `description`, `alias`, `sources`, `outputs`, `env`, `depends`, `depends_post`, `wait_for`, `tools`, `dir`, `hide`, `run`, `quiet`, `silent`, `raw`, `shell`, `confirm`, `timeout`.
+**Supported `#MISE` directives:** `description`, `alias`, `sources`, `outputs`, `env`, `vars`, `depends`, `depends_post`, `wait_for`, `tools`, `dir`, `hide`, `run`, `quiet`, `silent`, `raw`, `shell`, `confirm`, `timeout`, **`extends`** (2026.9.11+).
 **Supported `#USAGE` directives:** `arg`, `flag`, `choices`, `complete`, `env`, and root-level `mount`.
 
 **Each `#MISE` line is TOML.** Arrays and inline tables may span lines as long as every line keeps the prefix, and dotted keys build tables without braces:
@@ -351,11 +373,13 @@ includes = ["git::https://github.com/myorg/shared-tasks.git//tasks?ref=main"]
 
 The `usage` field uses [KDL-inspired syntax](https://usage.jdx.dev/) to define arguments, flags, and completions.
 
-> 🔴 **Version context (2026-08-24) — major jump.** mise now depends on **usage-rs / usage-lib v6** (`usage_rs = "6"`, `usage-lib = "6"` in mise's `Cargo.toml`; usage 6.3.0 is current). In **2026.8.11** mise migrated its *own* CLI parser, help output, and shell completions from clap to usage-rs.
+> 🔴 **Version context (verified 2026-09-20).** mise depends on **usage-rs / usage-lib v6**; **usage 6.10.0** is current (released 2026-09-19). In **2026.8.11** mise migrated its *own* CLI parser, help output, and shell completions from clap to usage-rs.
 >
 > This invalidates the old "usage 4.1.0" limits: attributes that previously hard-errored — `flag { alias }`, `required_if`, `required_unless`, `overrides`, `conflicts`, `requires` — **now work**, and `double_dash="required"` is **now enforced**. v6 also adds `group`, `flagset`/`use`, and `output`/`exit_code` nodes plus a large batch of new `arg`/`flag` attributes.
 >
-> Everything below was verified empirically against **mise 2026.8.12**. Two features remain compiled out of mise (see [Feature-Gated](#feature-gated-out-of-mise-hard-error)).
+> The attribute tables below were verified empirically against **mise 2026.8.12 / usage-lib v6**; the surrounding mise behavior is current as of **mise 2026.9.12**. Two features remain compiled out of mise (see [Feature-Gated](#feature-gated-out-of-mise-hard-error)).
+>
+> Later v6 additions (6.4.0–6.10.0) are mostly host-CLI concerns — default-subcommand flag routing and help pages, standalone `Args` parsing, native completions, typed Go CLI fields, and a ~4× faster KDL parser for large specs — none of which change how a mise task spec is authored.
 
 ### Positional Arguments (`arg`)
 
@@ -739,6 +763,9 @@ default_subcommand "..." # "naked" invocation target
 source_code_link_template "..."  # Tera template with {{path}} / {{cmd}}
 example "code" header="..." help="..." lang="..."
 include file="./other.usage.kdl"   # merge another spec (file= is required)
+                                   # In FILE TASKS (2026.9.12+) the path may be relative to the
+                                   # task file, or use $MISE_CONFIG_ROOT / $MISE_TASK_DIR /
+                                   # $MISE_PROJECT_ROOT — so shared flagsets need no absolute path.
 ```
 
 `repository` (a plain URL, like `Cargo.toml`'s) is distinct from `source_code_link_template` (a per-command deep link) — neither implies the other. There is **no `mount` at spec root** in usage itself; see the file-task hoisting note above.
@@ -874,6 +901,7 @@ cmd "check" {
 | `pass_through_env` | `string[]` | — | Ambient env vars passed through **without** affecting the cache key (tokens, CI vars). Survives `deny_env`. |
 | `tools` | `table` | — | Tools to install before running |
 | `vars` | `table` | — | Task-local vars that override `[vars]` |
+| `daemons` | `bool \| string \| string[]` | — | **Experimental (2026.9.12+).** Project daemons that must be running and ready before the task body runs. `true` = every daemon in this project's `[daemons]`. See [Tasks That Require Daemons](#tasks-that-require-daemons). |
 
 #### Execution Context
 
@@ -899,7 +927,7 @@ cmd "check" {
 | `sources` | `string \| string[]` | — | Input files (globs, `{a,b}` braces, `!` exclusions, `@group:name` refs) |
 | `outputs` | `string \| string[] \| {auto: true}` | `{auto: true}` (if `sources` set) | Generated files. Supports ordered `!` exclusions. `outputs = []` enables result-only caching. |
 | `cache` | `{enabled, audit, env, command_inputs}` | `{enabled=false, audit=false, env=[], command_inputs=[]}` | **Experimental.** Task output artifact cache — see [Task Output Caching](#task-output-caching-experimental). |
-| `rust_cache` | `bool \| {enabled: bool}` | — | **Experimental.** Rust compiler action cache, enabled only while this task runs. No doc page — schema/settings only. |
+| `rust_cache` | `bool \| {enabled: bool}` | — | 🔴 **Deprecated NO-OP** (removal 2027.8.14). Does nothing. Use [mbx](#rust-compiler-action-cache--removed-rust_cache-is-a-no-op). |
 | `watch` | `{no_vcs_ignore: bool}` | — | `no_vcs_ignore = true` watches sources excluded by `.gitignore` (2026.8.0+) |
 
 #### Safety & Sandboxing
@@ -1000,11 +1028,35 @@ run = "pytest --cov"       # overrides the template's run
 |----------|--------|
 | **Full override** (task wins, no merging) | `run`, `run_windows`, `depends`, `depends_post`, `wait_for`, `sources`, `outputs`, `cache`, `output` |
 | **Override if set locally** | `dir`, `description`, `shell`, `timeout` |
-| **Deep merge** (per key; task wins) | `tools`, `env` |
+| **Deep merge** (per key; task wins) | `tools`, `env`, `vars` |
+| **Concatenated** | `usage` — **template's flags first, then the task's** (2026.9.11+) |
 | **Compose / combine** | sandbox `deny_*` compose; `allow_*` combine |
 | **Not allowed on templates** | `hide`, `interactive`, `quiet`, `raw`, `raw_args` — set these per task |
 
 > `depends` **replaces** rather than merges: template `["lint","typecheck"]` + task `["build"]` = `["build"]`.
+
+> ⚠️ **An empty local list does NOT cancel an inherited one.** `depends = []` on the task still inherits the template's `depends`. To genuinely clear it, extend a different template that has none.
+
+**`usage` now merges (changed 2026.9.11).** A task that `extends` a template *and* declares its own `usage` gets the template's flags **too**, listed first in `--help`. Previously the task's spec replaced the template's entirely, so shared flags had to be copied into every task.
+
+```toml
+[task_templates.deploy]
+usage = 'flag "--env <env>" help="Target environment"'
+
+[tasks."deploy:api"]
+extends = "deploy"
+usage = 'flag "--canary" help="Canary rollout"'   # --env AND --canary both available
+run = "./deploy.sh"
+```
+
+> A flag declared in **both** places is listed **twice** — declare each flag in exactly one of the two. Workspace-root `[monorepo.task_defaults]` still only fills in `usage` when the task has none.
+
+**File tasks can extend too (2026.9.11+):**
+```bash
+#!/usr/bin/env bash
+#MISE extends="python:build"
+```
+For a **file task the template's `run` is ignored** (the script itself is the command), but `extends` still inherits tools, env, vars, args, and the rest. A template's `vars` can also read values the extending task supplies.
 
 Templates are Tera-rendered in the **consuming** project's context (`{{config_root}}`, `{{env.VAR}}`, `{{cwd}}`, `{{vars.*}}`). Tasks loaded via `task_config.includes` now receive the collected `task_templates` map.
 
@@ -1030,8 +1082,9 @@ includes = [
 | `shell` | string | — | Project-scoped default shell; task-level `shell` wins |
 | `cascade` | bool | `false` | Cascade `dir`, `shell`, `cache`, `includes` to descendant config roots |
 | `includes` | string[] | the five default task dirs | **Last entry wins** on name collision |
+| `excludes` | string[] | `[]` | Config-root-relative paths or glob patterns excluded from **file-task discovery** |
 | `cache` | table | — | **Experimental**; inherits only to tasks with sources+outputs |
-| `rust_cache` | bool \| table | — | **Experimental**; default Rust action-cache setting for tasks in this scope |
+| `rust_cache` | bool \| table | — | 🔴 **Deprecated NO-OP** (removal 2027.8.14). Does nothing. |
 | `global_env` | string[] | — | **Experimental**; env names folded into every task's cache key |
 | `global_pass_through_env` | string[] | — | **Experimental**; passed through without affecting cache keys |
 | `global_inputs` | string[] | — | **Experimental**; config-rooted patterns applied to every task; may use `@group:` refs |
@@ -1199,7 +1252,7 @@ Vars accessed via `{{vars.key_name}}` Tera templates. **Scope precedence:** glob
 - `keep-order` — Stream one task's output live; buffer others; print in definition order
 - `replacing` — Replace stdout on each new line (similar to `mise install`)
 - `timed` — Show only stdout lines that took >1s
-- `quiet` — Print only task stdout/stderr, nothing from mise itself
+- `quiet` — Print only task stdout/stderr, nothing from mise itself. **Deprecated 2026.9.4, removed 2027.9.3** — use an explicit style plus `task.quiet = true` (`MISE_TASK_QUIET`), which suppresses mise's own task messages, prefixes, and command-echo headers without hiding task output.
 - `silent` — Print nothing from tasks or mise
 
 Set via `--output`, `task.output`, `MISE_TASK_OUTPUT`, or the per-task `output` field. Style is **orthogonal** to verbosity — `MISE_TASK_OUTPUT=prefix --quiet` keeps prefixes while silencing mise's own messages.
@@ -1301,6 +1354,15 @@ outputs = ["dist/**", "!dist/*.map"]
 Excluded output paths are omitted from freshness hashes and cache archives; existing excluded files are preserved on restore.
 
 Brace globs work in both (2026.8.0+): `sources = ["{src,lib}/**/*.ts"]`.
+
+**Templated sources/outputs (2026.9.5+):** both accept `{{usage.*}}`, so freshness can be scoped per invocation:
+```toml
+[tasks.build]
+usage = 'arg "<target>"'
+sources = ["src/{{usage.target}}/**/*.ts"]
+outputs = ["dist/{{usage.target}}/**"]
+run = "tsc --build {{usage.target}}"
+```
 
 **Auto outputs:**
 ```toml
@@ -1454,20 +1516,26 @@ Added **v2026.8.1**. A composite store: reads local first, promotes remote hits,
 
 Protocol reference: `https://mise.jdx.dev/tasks/remote-cache-protocol.html` (protocol version 1).
 
-### Rust Compiler Action Cache (Experimental)
+### Rust Compiler Action Cache — REMOVED (`rust_cache` is a no-op)
 
-Distinct from the task *output* cache: this caches individual **rustc invocations** (an "action cache"), sharing the same remote backend. There is **no doc page** — it exists only in the JSON schema and `settings.toml`.
+> 🔴 **`rust_cache` is a deprecated NO-OP. Do not use it.** The JSON schema marks the field `"deprecated": true` with the description *"deprecated no-op; use mbx for Rust action caching instead."* Setting `rust_cache = true` on a task or in `[task_config]` does **nothing** — it neither errors nor caches. Removal is scheduled for **2027.8.14**.
+>
+> Earlier versions of this skill documented it as a working experimental rustc action cache (concurrent blob prefetch, shared remote backend). That is no longer accurate.
+
+**Migrate to [mbx](https://mr-boxington.jdx.dev/getting-started)** (Mr. Boxington), the separate `jdx` project that now owns Rust action caching:
 
 ```toml
+# ❌ no longer does anything
 [tasks.build]
-run = "cargo build --release"
-rust_cache = true                  # or { enabled = true }
+rust_cache = true
 
-[task_config]
-rust_cache = true                  # default for every task in this config scope
+# ✅ use mbx instead — e.g. as a command wrapper
+[wrappers.cargo]
+command = "mbx"
+env = { MBX_CARGO_SHIM_MODE = "1" }
 ```
 
-`rust_cache` accepts a bool or `{ enabled = true }`, and is enabled **only while that task runs**. Remote prefetch downloads output blobs concurrently (up to 48 in parallel) while reserving foreground slots for compiler lookups — aimed at large Rust restores that previously fetched thousands of small artifacts serially. `--task-cache=local-only` disables remote access.
+The task **output** cache ([Local Artifact Cache](#local-artifact-cache)) is unaffected and still works — it caches whole task results, not individual rustc invocations.
 
 ---
 
@@ -1475,25 +1543,28 @@ rust_cache = true                  # default for every task in this config scope
 
 ### Backends Overview
 
-mise supports **19 backends** plus custom backend plugins (`mise backends ls` on 2026.8.12: aqua, asdf, cargo, conda, core, dotnet, forgejo, gem, github, gitlab, go, http, npm, pipx, pkgx, s3, spm, ubi, vfox). The registry assigns tools to backends by an **acceptance-tier** preference order — prefer the highest tier available for a given tool:
+mise supports **20 backends** plus custom backend plugins (`mise backends ls` on 2026.9.12: aqua, asdf, cargo, conda, core, dotnet, forgejo, gem, github, gitlab, go, http, npm, **packslip**, pkgx, **pypi**, s3, spm, ubi, vfox). The registry assigns tools to backends by an **acceptance-tier** preference order — prefer the highest tier available for a given tool:
 
 | Tier | Backends | When chosen |
 |------|----------|-------------|
-| **1 — Preferred** | **aqua**, **github**, **gitlab** | aqua offers the most features + security (cosign/SLSA/attestation/minisign, native Windows, no plugin). github/gitlab for releases not yet in aqua. |
+| **1 — Preferred** | **packslip**, **aqua**, **github**, **gitlab** | packslip when the publisher ships signed release manifests (best provenance + version-matched completions/man pages/agent skills). aqua otherwise offers the most features + security (cosign/SLSA/attestation/minisign, native Windows, no plugin). github/gitlab for releases not yet in aqua. |
 | **2 — High bar** | **conda** | Lower bar than tier 3 because mise's conda backend needs no separately-installed package manager. |
-| **3 — Very high bar** | **pipx**, **npm**, **gem**, **go**, **cargo**, **dotnet** | Depend on a separately-installed runtime on PATH; silently bind tools to whichever runtime was available at install time. |
+| **3 — Very high bar** | **pypi**, **npm**, **gem**, **go**, **cargo**, **dotnet** | Depend on a separately-installed runtime on PATH; silently bind tools to whichever runtime was available at install time. |
 | **Other** | **forgejo**, **http**, **s3**, **spm**, **pkgx** | forgejo (Codeberg default); http for direct URLs; s3 for private buckets; spm for Swift; pkgx (experimental) for the pkgx pantry. |
+
+> 🔴 **`pipx:` → `pypi:` (2026.9.7).** `pypi:` is the preferred name for the Python CLI backend. `pipx:` remains **fully supported with no warnings**, and settings accept both `pypi.*` and `pipx.*` spellings. But the two are **distinct tool identities** (`pypi-black` vs `pipx-black` install dirs and lock entries), so switching spelling creates a separate installation. mise preserves explicit `pipx:` names in output and lockfiles.
 | **Not accepted for new registry entries** | **vfox**, **asdf**, **ubi** | vfox/asdf rejected for supply-chain reasons; ubi deprecated. |
 
 | Backend | Status | Description |
 |---------|--------|-------------|
+| **packslip** | stable | Signed release manifests published by maintainers; signer pinning (SSH-style), plus version-matched completions, man pages, and agent skills. No Packslip CLI needed. |
 | **aqua** | stable | Most features, best security (cosign/SLSA/attestation/minisign). No plugins needed. Native Windows. Registry compiled into the mise binary; the aqua CLI is never used. |
 | **github** | stable | GitHub releases with auto OS/arch/libc asset detection |
 | **gitlab** | stable | GitLab releases |
 | **forgejo** | stable | Forgejo/Codeberg releases |
 | **http** | stable | Direct HTTP/HTTPS downloads with URL templating |
 | **s3** | stable | S3/MinIO/S3-compatible private buckets (AWS SDK credential chain) |
-| **pipx** | stable | Python CLIs in isolated environments (uses uvx by default) |
+| **pypi** | stable | Python CLIs in isolated environments (uses uv by default, pipx fallback). `pipx:` is a supported alias with a **separate tool identity**. |
 | **npm** | stable | Node packages via the embedded `aube` installer — **node/npm not required to install** |
 | **go** | stable | Go packages (requires compilation) |
 | **cargo** | stable | Rust packages (uses binstall by default) |
@@ -1539,6 +1610,8 @@ mise registry --hide-aliased
 mise use                         # interactive selector
 mise search <query>              # -m equal|contains|fuzzy (default fuzzy)
 ```
+
+> **Registry default-backend changes (2026.9.6):** `postgres`, `redis`, and `mongodb` shorthands now prefer **`conda:`**. `mise use <tool>` therefore resolves differently than in earlier versions — pin the backend explicitly (`aqua:…`, `github:…`) if you depend on the old resolution.
 
 **Floating registries** (`registry_floating = true`, default `false`) fetch the shorthand registry published with the latest mise release plus the current official aqua registry, instead of the release-pinned snapshots. Bundled snapshots remain the fallback, and fast/offline commands never refresh. Opt-in, because a floating registry may contain changes made after your installed mise was tested.
 
@@ -1618,11 +1691,15 @@ Universal options supported by every backend:
 | Option | Type | Description |
 |--------|------|-------------|
 | `version` / `prefix` / `ref` / `path` | string | The selector — exactly one required in table form |
-| `os` | string \| string[] | Restrict to OS/arch: `"linux"`, `"macos"`/`"darwin"`, `"windows"`/`"win"`. Combos: `"linux/x64"`, `"macos/arm64"`. Arches: `arm64`/`aarch64`, `x64`/`x86_64`/`amd64`. A bare OS matches any arch; an entry with `/` requires both to match. Non-matching ⇒ mise skips installing **and using** the tool. |
+| `os` | string \| string[] | Restrict to OS/arch: `"linux"`, `"macos"`/`"darwin"`, `"windows"`/`"win"`, and **`"unix"`** (2026.9.12+ — every non-Windows platform). Combos: `"linux/x64"`, `"macos/arm64"`. Arches: `arm64`/`aarch64`, `x64`/`x86_64`/`amd64`. A bare OS matches any arch; an entry with `/` requires both to match. A **concrete OS variant wins over a `unix` one**. Non-matching ⇒ mise skips installing **and using** the tool. The same selector syntax applies in `[bootstrap.packages]`, `[doctor.checks]`, and `[dotfiles]` variants. |
 | `install_env` | table | Environment variables injected during install (and tool-level `postinstall`) |
 | `postinstall` | string | Command after successful install. `MISE_TOOL_INSTALL_PATH` available; the tool's bin dir is on PATH. |
 | `depends` | string \| string[] | **Install-graph ordering only**, and only for tools already in the current install set. Does not add tools to the PATH used by vfox install hooks — declare those in the plugin's `metadata.lua`. (Exception: since 2026.7.18 the **asdf** backend does put `depends` tools on the PATH for `bin/download`/`bin/install`.) |
 | `version_order` | `"source"` \| `"semver"` | **2026.8.4+.** Make `latest` and prefix resolution follow semantic precedence rather than source/chronological order. Supported on **aqua, github, gitlab, forgejo, http**. Fixes releases where a backport line outranked a newer version (neo4j, victoria-metrics, talosctl, tealdeer…). `mise ls-remote` still shows upstream source order. |
+| `lazy` | bool | **2026.9.0+.** Defer installation until one of the tool's bootstrap shims is invoked. See [Lazy Tools](#lazy-tools). Default `false`. |
+| `lazy_bins` | string[] | **2026.9.0+.** Command names for lazy tools whose backend has no registry `bins` metadata. |
+| `minimum_release_age` | string | Per-tool override of the supply-chain delay (e.g. `"1d"`, `"0s"` to disable). A **built-in 24h default applies when unset** on timestamp-reporting backends — see [Lockfiles](#lockfiles-miselock). |
+| `install_before` | string | **Deprecated** — maps to `minimum_release_age` (warns 2026.10.0, removed 2027.10.0). |
 
 > `github_attestations` is **not** universal — it is a `github:` backend tool option. The separate *global* `github_attestations` setting (default `true`) applies to supported tools.
 
@@ -1641,6 +1718,97 @@ python = "3.12.11"
 Tool option values support template expansion referencing `env.*` and `vars.*` (including values produced by `_.source`/`_.file`); nested option arrays/tables are Tera-rendered too (2026.7.7+).
 
 ### Backend-Specific Configuration
+
+#### Packslip Backend (Preferred where available)
+
+Installs from **signed release manifests published by maintainers**. mise verifies the release, picks the build for your platform, and installs its executables — plus any completions, man pages, and agent skills the release declares. No Packslip CLI needed.
+
+```toml
+[tools]
+"packslip:github.com/jdx/hk" = "latest"
+"packslip:jdx/hk" = "latest"              # GitHub host may be omitted
+"packslip:tool.example.com" = { version = "latest", pubkey = "/path/to/vendor.pub" }
+```
+
+| Identifier | Source |
+|------------|--------|
+| `packslip:github.com/owner/repo` | A GitHub repository's releases |
+| `packslip:github.com/owner/repo/tools/mytool` | One tool in a GitHub monorepo |
+| `packslip:tool.example.com` | A signed release list hosted by the publisher |
+| `packslip:example.com/tools/mytool` | One tool on a publisher's domain |
+
+The project **must publish Packslip manifests** — this backend never infers install instructions from arbitrary release filenames. GitHub projects get built-in release discovery and signer identity rules; other hosts need a signed release list plus explicit signer configuration.
+
+**Tool options:**
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `variant` | none | Select a publisher-declared alternative build (`fips`, `baseline`). Without it, only artifacts with **no** variant are considered. |
+| `pubkey` | unset | Pin a minisign-format public key, or the path to its `.pub` file |
+| `identity` / `identity_prefix` / `issuer` | derived from a recognized forge | Expected keyless signer + OIDC issuer. Keep the trailing slash in a repository prefix. |
+| `list_identity_prefix` | release signer policy | Pin a different workflow for the **vendor release list** only. Requires `issuer`; cannot combine with `pubkey`. |
+| `prerelease` | `false` | Include prerelease versions |
+| `trust` | configured stampers | `"vendor"` exempts this tool from stamp requirements |
+| `allow_unlogged` | `false` | Accept key-signed bundles without transparency-log evidence |
+| `ignore_requirements` | `false` | Install despite confirmed host requirement failures |
+
+**Settings:** `packslip.exec` (default `false` — run a tool's own command at install time to produce a resource its packslip offers only as an `exec` entry; does **not** disable on-demand completion generation), `packslip.stampers` (hosts whose signed stamp lists say which releases may be installed, each with its pin).
+
+**Version selection.** Only releases with Packslip manifests are visible. Semantic versions, including compatible date versions like `2026.9.1`. Prereleases excluded unless opted in. `latest` follows the publisher's `latest` pointer in a signed release list → GitHub's latest release → the highest eligible semver; a publisher may recommend an older supported release over a newer major.
+
+> **The 24-hour `minimum_release_age` applies here**, so a just-published release may be absent until it cools. That 24h is mise's **built-in default for timestamp-reporting backends** (packslip among them) whenever the setting is unset — see [Lockfiles](#lockfiles-miselock).
+
+**Private GitHub repos** work with the same credentials as `github:` (`MISE_GITHUB_TOKEN`, `GITHUB_API_TOKEN`, `GITHUB_TOKEN`) and need nothing in config. The token is transport-only: signature, project identity, signer continuity, and digest checks are unchanged, and no credential is read from the signed manifest.
+
+**Signer pinning.** mise remembers which signer it accepted, the way SSH remembers hosts. A later release from another signer, a weaker scheme, a repackager where the vendor signed before, or one that drops build provenance is **refused until a person says so**:
+
+```bash
+mise packslip pins [--json]              # list accepted signers
+mise packslip forget github.com/jdx/hk   # reset the pin so the next accepted release sets it again
+```
+
+`forget` also resets vendor release-list continuity. It does **not** change explicit signer options, erase stamper-list state, or remove a signer commitment from `mise.lock` — configure the new signer policy first, and if a lockfile entry conflicts, remove and regenerate it with `mise install`.
+
+mise retains the verified manifest as `.mise-packslip.json` in the install directory.
+
+> Verification authenticates the **publisher and bytes**, not that the software is safe. mise records whether build provenance links are present but does not fetch and verify that linked provenance.
+
+#### PyPI Backend (formerly pipx)
+
+```toml
+[tools]
+python = "3.14"
+uv = "latest"
+"pypi:black" = "latest"
+"pypi:harlequin" = { version = "latest", extras = ["postgres", "s3"] }
+"pypi:azure-cli" = { version = "latest", with = ["pip"] }
+"pypi:ansible" = { version = "latest", expose = ["ansible-core"] }
+"pypi:ansible" = { version = "latest", uvx = false, expose = [], pipx_args = "--include-deps" }
+```
+
+mise uses **uv**: with dependency locking it runs `uv sync --frozen`; version-only installs use `uv tool install`, falling back to `pipx install` when uv is unavailable.
+
+**Package sources:** `pypi:black` (PyPI) · `pypi:psf/black` (GitHub) · `pypi:git+https://github.com/psf/black.git[@main]` (Git). For GitHub sources `latest` installs from the **unpinned default branch** — not the latest release; use an explicit version for a release. Direct HTTPS archive URLs are unsupported.
+
+**Tool options:**
+
+| Option | Notes |
+|--------|-------|
+| `extras` | String or array of Python package extras. Works with Git sources. Inline: `mise use 'pypi:psf/black[extras=jupyter]@latest'` |
+| `package_name` | For Git repos whose name differs from the Python distribution name |
+| `with` | Extra requirements installed **into** the tool environment. Requires uv; participates in locking. |
+| `expose` | Like `with`, but also exposes their entry points. Requires **uv ≥ 0.8.5**; participates in locking. |
+| `dependency_prereleases` | uv prerelease policy: `disallow` \| `allow` \| `if-necessary` \| `explicit` |
+| `registry_url` | Per-tool index (include a `{}` placeholder for the package name); overrides `pypi.registry_url` |
+| `uvx` | `false` selects the pipx installer (version-only locking) |
+| `uvx_args` / `pipx_args` | Free-form installer args. **Version-only installs only** — rejected by explicit dependency locking. |
+| `install_env` | Env during install |
+
+> A `with`/`expose` requirement pinned to an exact version **narrows the locked Python range** to what that release supports, so the tool may need a newer interpreter than it declares. Guard with a marker: `"legacy==1.0.0; python_version < '3.12'"`.
+
+**Settings:** `pypi.registry_url`, `pypi.uvx` (`pipx.registry_url` / `pipx.uvx` are compatibility aliases). The legacy names `uvx`/`uvx_args` control **uv** installation — they do not mean mise runs the `uvx` command.
+
+Honors `minimum_release_age` via uv `--exclude-newer` (needs uv ≥ 0.2.22) or pip `--uploaded-prior-to`. Reinstall after a Python upgrade: `mise install --force pypi:black`.
 
 #### Aqua Backend (Preferred)
 
@@ -1777,7 +1945,18 @@ linux-x64 = { url = "https://example.com/tool-linux-x64.tar.gz", checksum = "sha
 
 > **expr-lang gotchas:** write the predicate placeholder as `{ #... }` **with a space** after `{`, because `{#` is the Tera comment delimiter. Index a map by runtime value with `[version + ""]` — a bare `[version]` is read as the literal key `"version"`.
 
-**Caching:** `$MISE_CACHE_DIR/http-tarballs/`, keyed by Blake3 hash of file content plus `strip_components`; installs are symlinks into the cache, so identical tarballs are shared across tools. Each entry carries `metadata.json`. Auto-pruned after 30 days.
+> 🔴 **Changed default (2026.9.6): HTTP tools now extract into their own install directory.** Previously installs were **symlinks into a deduplicated cache** at `$MISE_CACHE_DIR/http-tarballs/` (keyed by Blake3 hash of content + `strip_components`), which meant `uninstall`/`prune` could not reclaim the disk. Own-directory extraction is now the default so that space is actually freed.
+>
+> Opt back into deduplication per tool with **`shared_extraction = true`**. Existing symlinked installs are unaffected until `mise install --force`, and **legacy `http-tarballs` entries are not reclaimed automatically**.
+
+```toml
+[tools."http:my-tool"]
+version = "1.0.0"
+url = "https://example.com/my-tool.tar.gz"
+shared_extraction = true    # opt back into the old shared/dedup cache layout
+```
+
+**Shared-cache behavior (when `shared_extraction = true`):** `$MISE_CACHE_DIR/http-tarballs/`, keyed by Blake3 hash of file content plus `strip_components`; installs are symlinks into the cache, so identical tarballs are shared across tools. Each entry carries `metadata.json`. Auto-pruned after 30 days.
 
 **http bin path lookup** has only 4 steps (no install-root-executable step): `bin_path` → `bin/` → subdirs containing `bin/` → root.
 
@@ -1824,24 +2003,20 @@ Since **2026.7.18**, installs record the effective `features`/`default-features`
 
 **Settings:** `cargo.binstall` (default `true`), `cargo.binstall_only` (default `false`), `cargo.binstall_quickinstall` (default `false` — mise passes `--disable-strategies compile,quick-install`; `true` → `--disable-strategies compile`), `cargo.binstall_native` (**graduated from experimental in 2026.7.16**; now also discovers conventionally named GitHub release artifacts from a crate's linked repo when `package.metadata.binstall` is absent, and works under the default `locked = true` path — warns 2027.1.0, becomes the default 2027.7.0), `cargo.registry_name`.
 
-#### Pipx Backend
+#### Pipx Backend (alias of `pypi:`)
+
+`pipx:` is a fully supported alias for [`pypi:`](#pypi-backend-formerly-pipx) — no warnings, same options, and settings accept both `pipx.*` and `pypi.*` spellings. Prefer `pypi:` in new configs.
 
 ```toml
 [tools]
-"pipx:black" = "latest"
+"pipx:black" = "latest"                                    # still valid
 "pipx:harlequin" = { version = "latest", extras = "postgres,s3" }
-"pipx:ansible" = { version = "latest", uvx = false }  # Disable uv
-"pipx:ansible-core" = { version = "latest", uvx_args = "--with ansible" }
-"pipx:black" = { version = "latest", pipx_args = "--preinstall" }
+"pipx:ansible" = { version = "latest", uvx = false }       # use the pipx installer
 ```
 
-**Tool options:** `extras` (string or array; now applies to git-based installs too), `package_name` (for Git repos whose name differs from the Python distribution name), `pipx_args`, `uvx` (per-tool toggle), `uvx_args`, `registry_url` (**2026.8.3+** — per-tool private PyPI-style index for version listing and `latest`; the latest-version cache is keyed by registry URL so registries never cross-pollute), `install_env`.
+> ⚠️ **`pypi:black` and `pipx:black` are distinct tool identities** — separate install directories and separate lock entries. Switching the prefix creates a **new installation**; it is not a rename. mise preserves explicit `pipx:` names in output and lockfiles.
 
-**Settings:** `pipx.uvx` (default `true`), `pipx.registry_url` (default `https://pypi.org/pypi/{}/json`).
-
-**Install sources:** PyPI, GitHub (`pipx:psf/black`), Git (`pipx:git+https://...@main`), HTTP ZIP.
-
-Honors `minimum_release_age` via uv `--exclude-newer` (needs `uv >= 0.2.22`) or pip `--uploaded-prior-to`. Reinstall after a Python upgrade: `mise install -f "pipx:*"`.
+Reinstall after a Python upgrade: `mise install -f "pipx:*"`.
 
 #### NPM Backend
 
@@ -1861,6 +2036,7 @@ Honors `minimum_release_age` via uv `--exclude-newer` (needs `uv >= 0.2.22`) or 
 | `allow_builds` | aube, aube_cli, pnpm ≥10.4, npm ≥11.16 | Array of package names, or `true` for all. Lifecycle build scripts are **denied by default**. |
 | `trust_policy_excludes` | aube / aube_cli | Exempt reviewed packages from trust-policy downgrade checks; supports ranges (`"undici@^5 \|\| >=6 <7"`) |
 | `allow_low_downloads` | aube | Bypasses aube's weekly-download popularity gate (**1000** downloads) for the requested package only — transitive deps stay gated |
+| `allow_exotic_deps` | aube | **2026.9.10+.** Array of package names, or `true` for all — permits git/file/tarball dependencies that aube blocks by default |
 | `aube_args` / `npm_args` / `pnpm_args` / `bun_args` | respective PM | Extra args (`aube_args` is ignored for embedded aube, which installs in-process) |
 | `install_env` | all | Env during install |
 
@@ -1954,6 +2130,45 @@ Tool ID is the pantry project name. Supports npm-style semver ranges; runtime en
 mise plugin install my-plugin https://github.com/username/my-plugin
 mise install my-plugin:some-tool@1.0.0
 ```
+
+### Lazy Tools
+
+Added **2026.9.0**. `lazy = true` makes mise generate **bootstrap shims** into its normal user/system shim farms without installing the tool. The provider is installed only when one of its commands is first called, then executes immediately; later calls run the real binary with no further mise dispatch.
+
+```toml
+[tools]
+node = { version = "24", lazy = true }
+"github:example/acme" = { version = "1.2.3", lazy = true, lazy_bins = ["acme", "acmectl"] }
+```
+
+- **Registry tools** derive their command names from the registry's `bins` metadata. **Explicit or non-registry backends must declare them** with `lazy_bins`.
+- A bare `mise install` **skips** lazy declarations — use `mise install --include-lazy` to provision them all.
+- Lazy tools also install when their command is invoked from a `mise run` task or `mise x` (2026.9.1+), matching activated-shell behavior. mise inserts the shim farms *after* real tool paths for lazy toolsets.
+- Lazy tools are **not** reported as `missing: <tool>` on project entry or a bare `mise install`, regardless of `status.missing_tools` (2026.9.8+). Ordinary missing tools still are.
+
+**Related path settings (2026.9.0+):** `shims_dir` (`MISE_SHIMS_DIR`), `system_installs_dir` (`MISE_SYSTEM_INSTALLS_DIR`), `system_shims_dir` (`MISE_SYSTEM_SHIMS_DIR`), plus `mise reshim --system` — for system-scoped and collocated layouts.
+
+> For a machine-wide catalogue of ordinary tools, prefer `lazy = true` over standalone [tool stubs](#tool-stubs). Tool stubs remain useful when the executable file itself should carry a portable, self-contained definition.
+
+### Tool Stubs
+
+An executable file that records how to obtain and run one tool — commit it so `./bin/py` selects the intended runtime. mise installs the tool on first execution; a normal project `mise install` does **not** discover and install arbitrary stub files.
+
+```toml
+#!/usr/bin/env -S mise tool-stub
+
+tool = "python"
+version = "3.14"
+bin = "python"
+```
+
+```bash
+chmod +x ./bin/py && ./bin/py --version
+```
+
+Fields sit at the **top level** — a stub is a tool declaration, not a whole `mise.toml`, so do **not** wrap them in `[tools]`. `tool`, `version`, `bin`, `os`, `install_env`, and embedded `lock` data control the stub; other keys pass to the selected backend. Omitting `tool` makes a top-level or platform-specific `url` select the HTTP backend; otherwise the **filename** is used as the tool name. A stub requires `mise` on PATH unless generated with the optional bootstrap wrapper. Generate with `mise generate tool-stub`.
+
+> `env -S` is required because Unix shebangs traditionally allow only one argument after the interpreter — it splits the line into `env` → `mise` → `tool-stub`.
 
 ### Shims and Aliases
 
@@ -2064,6 +2279,37 @@ mise completion powershell | Out-String | Invoke-Expression
 
 > **Standalone usage scripts** need a separate one-time opt-in: `source <(usage g completion-init bash)` in `~/.bashrc` (zsh: same in `~/.zshrc`; fish: `usage g completion-init fish | source`). Since usage 3.5.6 the completion spec cache lives in `${XDG_CACHE_HOME:-$HOME/.cache}/usage` — **regenerate completion scripts** to pick it up.
 
+### Packslip, Man Pages, and Agent Skills
+
+Tools installed through the [`packslip:` backend](#packslip-backend-preferred-where-available) can ship **man pages, shell completions, and agent skills that match the version active in your project**. The publisher declares them in the release manifest. An existing installation from another backend does **not** acquire them.
+
+**Completions** (zsh, bash, fish, PowerShell) become available automatically with `mise activate` — the installed completion follows the tool version active in each project, so changing versions needs no reinstall. mise registers a loader and reads the publisher's script only when you complete a command; leaving the project removes the registration.
+
+```bash
+mise completion zsh --tool hk --install    # manual setup without shell activation
+mise completion zsh --tool hk              # print without installing
+```
+
+`--tool` takes the **command name**, not a backend identifier. Without `--tool`, `mise completion` generates completions for mise itself. mise writes the completion file but never edits your shell config, and preserves an existing file it did not create unless you pass `--force`.
+
+**Man pages** declared as a static `man` resource are added to `MANPATH` while that tool version is active (in an activated shell and under `mise exec`/`run`/`env`). They live under `.mise-packslip/man` in the tool's installation; a tool installed with an older mise must be reinstalled once. Generated `exec` resources and pages derived only from a `cli-spec` are **not** installed automatically.
+
+**Agent skills** — a directory holding `SKILL.md` and its supporting files, in the Agent Skills format. mise knows which tool version is active, so it hands an agent the skill for exactly that version.
+
+```bash
+mise skills ls [--json]                    # skills the active tools declare
+mise skills sync --dir .agents/skills      # link them where your agent looks
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `skills.fetch` | `true` | Fetch the agent skills a tool's packslip declares when installing it |
+| `skills.auto_sync` | `false` | Link active tools' skills into the project after `mise install` and `mise use` |
+| `skills.dir` | `.claude/skills` | Where `mise skills sync` links skills — under the project root, or under `$HOME` with `--global` |
+| `skills.prune` | `false` | Remove links mise made for skills that are no longer active when syncing |
+
+> If a completion needs the publisher's generator command, mise runs it **on demand** and caches successful output per installed version/executable/shell. `packslip.exec` controls resource generation **at install time**; setting it to `false` does **not** disable on-demand completion generation.
+
 ### Lockfiles (`mise.lock`)
 
 **Lockfiles are not created automatically.** Enable with the `lockfile` setting, then `touch mise.lock && mise install` (or run `mise lock`). Once one exists, mise keeps it updated as tools are installed or upgraded.
@@ -2084,7 +2330,12 @@ backend = "aqua:BurntSushi/ripgrep"
 options = { exe = "rg" }
 ```
 
-Tool entry fields: `version` (required), `backend`, `options` (backend-specific artifact identity), `platforms`. Platform sub-fields: `checksum` (SHA256 or Blake3), `size`, `url`.
+Tool entry fields: `version` (required), `backend`, `specifiers` (the original requests that resolved here), `options` (backend-specific artifact identity), `platforms`, plus `aube` / `uv` (revision 2 — sidecar path + digest for npm / Python dependency graphs).
+Platform sub-fields: `checksum` (SHA256 or Blake3), `url`, `url_api` (authenticated asset requests), `provenance` (which method verified it — SLSA / cosign / minisign / GitHub attestations), `signer` / `attested_by` (packslip identity), `size` (**legacy, read-only now**).
+
+**Backends exempt from strict URL-locking** (`--locked` does not require a resolved URL): `asdf`, `cargo`, `gem`, `go`, `npm`, `pypi`/`pipx`, `ubi`, `core:dotnet`, `core:rust`, `core:swift`. URL-lockable backends — `aqua`, `github`, `gitlab`, `http`, `s3`, `packslip` — must have a resolved URL for the current platform.
+
+> A `provenance` field alone is **not proof the bytes were verified**. The lockfile is a trust input requiring review, not an automatic guarantee.
 
 **Multiple entries per version** occur when artifact identity depends on more than the platform key — e.g. Swift's per-distro Linux tarballs. Entries match on options **exactly**, so a machine only verifies against its own distro's entry:
 ```toml
@@ -2130,6 +2381,29 @@ Settings: `lockfile` (unset behaves as enabled without conflicting with `locked`
 
 **Lockfile format version (2026.8.11+):** lockfiles now carry `lockfile_version = 1` and bind each original request to the entry it resolved, so overlapping requests like `"1"` and `"1.0.0"` can lock different versions. Existing unversioned lockfiles stay on format 0 during ordinary `mise lock`/`install`/`upgrade` to avoid drift — run **`mise lock --upgrade`** to migrate (transactional; rolls back on failure).
 
+#### Lockfile Revision 2 (2026.9.7+) — dependency graphs
+
+Revision 2 records the **full transitive dependency graph** of `npm:` tools (via embedded aube) and `pypi:` tools (via uv), then replays it with a strict frozen install — so two projects on the same top-level version can each keep their own reviewed graph.
+
+Graphs live in **native sidecar files** (`uv.lock` / `aube-lock.yaml` plus a manifest) under `.mise/locks/<backend-tool>/<version>/`, referenced from `mise.lock` by relative path and SHA-256 digest, so the lockfile itself stays small.
+
+```bash
+mise lock --upgrade            # move an existing lockfile to revision 2 and resolve graphs
+mise install --locked          # replay the recorded graphs
+mise lock --bump pypi:black    # refresh Black's transitive deps without changing its version
+uv tree --project .mise/locks/pypi-black/24.10.0    # inspect a sidecar directly
+```
+
+- **Commit the sidecar directory alongside `mise.lock`.** If you gitignore `mise.local.lock`, also ignore its sidecar subdirectory (e.g. `.mise/locks/mise.local/`).
+- New lockfiles use revision 2; **revision 0 and 1 files keep their format** until you run `mise lock --upgrade`.
+- Ordinary `mise install` validates and accepts hand-edited sidecars; `mise install --locked` **rejects digest mismatches** until you run `mise lock`.
+- Python graph locking needs **uv ≥ 0.12.10** and published **wheels** for the target platform — explicit `mise lock` and locked installs never build sdists. Git sources, standalone pipx installs, and free-form `uvx_args`/`pipx_args` stay **version-only**.
+- Lock generation needs an interpreter discoverable by uv, though it need not match the tool's configured Python version.
+
+> 🔴 **Breaking: revision 2 is not readable by older mise versions.** Upgrade collaborators and CI to 2026.9.7+ before committing a revision 2 `mise.lock`. Revision 2 `--locked` installs fail if a recorded graph is missing or its digest doesn't match.
+
+> ✅ **Fixed 2026.9.7:** installing from a committed `mise.lock` no longer fails when the locked release is younger than `minimum_release_age`. The cutoff still applies to unlocked fuzzy requests and to generating/bumping a lockfile, so a reviewed lock entry reproduces immediately in CI.
+
 > ⚠️ **Settings are global in scope.** `locked = true` in a project's `mise.toml` applies to *all* tool resolution, including tools from `~/.config/mise/config.toml`. Fix warnings about global tools with `mise lock -g`.
 >
 > ✅ **Use `[tool_config]` for project-scoped strictness instead (2026.8.6+).** This is a top-level config key — not a setting — and applies only to tools declared by configs sharing that config root, without forcing global or parent-root tools into strict mode:
@@ -2139,12 +2413,20 @@ Settings: `lockfile` (unset behaves as enabled without conflicting with `locked`
 > ```
 > `[settings] locked`, the `--locked` flag, and `MISE_LOCKED` remain invocation-wide.
 
-`minimum_release_age` (env `MISE_MINIMUM_RELEASE_AGE`, **unset by default — opt in**) filters fuzzy version requests by release date — supply-chain delay protection. Verified on 2026.8.12: the setting is `optional` with no default in `settings.toml`, and `mise settings get minimum_release_age` reports it as not set. Accepts relative durations (`7d`, `90d`, `6mo`, `1y`) and absolute dates (`2024-06-01`, `2024-06-01T12:00:00Z`); `"0s"` effectively disables it. Versions without release timestamps are included. Explicit pins are never filtered. Only **`npm:` and `pipx:`** forward the cutoff into transitive dependency resolution. Exempt tools with `minimum_release_age_excludes = ["trivy", "npm:*"]` (backend wildcards, registry shorthands, or full IDs), or per-tool:
+`minimum_release_age` (env `MISE_MINIMUM_RELEASE_AGE`) filters fuzzy version requests by release date — supply-chain delay protection. Accepts relative durations (`7d`, `90d`, `6mo`, `1y`) and absolute dates (`2024-06-01`, `2024-06-01T12:00:00Z`); `"0s"` disables it. Versions without release timestamps are included. Only **`npm:` and `pypi:`/`pipx:`** forward the cutoff into transitive dependency resolution. Exempt tools with `minimum_release_age_excludes = ["trivy", "npm:*"]` (backend wildcards, registry shorthands, or full IDs), or per-tool:
 ```toml
 [tools.trivy]
 minimum_release_age = "1d"
 ```
 Note durations use jiff format — months are `6mo`, not `6m`. The deprecated `install_before` setting maps to this (warns 2026.10.0, removed 2027.10.0).
+
+> 🔴 **There IS a built-in 24h default — the setting being "unset" does not mean "off."** This is a subtle trap. `mise settings get minimum_release_age` reports *not set* and the JSON schema carries **no `default`**, because `settings.toml` declares `default_docs = "24h"` (a docs-display value) rather than `default`. But mise's source defines `DEFAULT_MINIMUM_RELEASE_AGE = "24h"` and applies it whenever the setting is unset, for backends that report release timestamps:
+>
+> **aqua, cargo, core, forgejo, gem, github, gitlab, go, npm, packslip, pipx/pypi, spm, ubi.**
+>
+> It does **not** apply to backends without release timestamps (http, s3, conda, dotnet, asdf, vfox, pkgx). Set `minimum_release_age = "0s"` to genuinely disable it, or a longer duration to harden. mise distinguishes the built-in default from an explicit value internally, so a fresh release being invisible for 24h is expected behavior, not a bug.
+>
+> **Never filtered regardless:** an explicit pin (`hk = "2.0.1"`) and a lockfile-resolved version — both are decisions already taken and committed. Since 2026.9.7, installing from a committed `mise.lock` no longer fails when the locked release is younger than the cutoff.
 
 CI flag: `--locked` (global flag on any command) errors if any version isn't resolved via the lockfile.
 
@@ -2166,13 +2448,19 @@ mise use -g node@22         # Write to global config
 mise use --pin node@22      # Pin exact resolved version (e.g. 22.5.1)
 mise use -E staging node@22 # Write to mise.staging.toml
 mise use --file mise.local.toml node@22   # --file and --path are interchangeable (2026.8.1+)
+mise use --postinstall 'corepack enable' node@22   # 2026.8.15+ set a per-tool postinstall
+mise use --tool-option matching=oxlint github:oxc-project/oxc  # 2026.9.2+, repeatable
 mise use --remove python    # Remove a tool from config
 mise use --dry-run-code     # Exit 1 if changes would be made
 mise install node@20        # Install without activation
 mise install                # Install all configured tools
 mise install -f "gem:*"     # Force reinstall pattern
 mise install --monorepo     # Install across all monorepo config roots
-mise install --system       # Install to the system data dir (may need sudo)
+mise install --system       # Install to the system data dir. On Unix (2026.9.12+) mise downloads,
+                            # verifies, and unpacks AS THE INVOKING USER, then uses sudo only to
+                            # publish into the system install/shim dirs. Supports relocatable tools
+                            # from aqua, github, gitlab, forgejo, http, s3 without a tool postinstall.
+                            # system_packages.sudo = false disables elevation.
 mise ls                     # List installed
 mise ls --current           # Active versions only
 mise ls --prunable          # Tools eligible for prune
@@ -2197,8 +2485,8 @@ mise outdated               # Check for updates
 mise upgrade                # Update versions (respects mise.toml ranges)
 mise upgrade --bump         # Bump mise.toml to absolute latest (keeps precision)
 mise upgrade -b             # 2026.8.6+ shorthand for --bump (old -l deprecated, removed 2027.8.5)
-mise upgrade --no-prune     # Keep the replaced version (2026.8.1+)
-mise upgrade --prune        # Force removal for one run when upgrade.auto_prune = false
+mise upgrade --no-prune     # Keep the replaced version indefinitely (2026.8.1+)
+mise upgrade --prune        # Force IMMEDIATE removal, skipping the upgrade.prune_after grace period
 mise upgrade -i             # Interactive selection
 mise install --force        # 2026.8.4+ works with no tool args: reinstall every configured tool
 mise lock --upgrade         # Migrate a format-0 lockfile to lockfile_version = 1
@@ -2225,15 +2513,32 @@ mise generate git-pre-commit # Generate pre-commit hook (staged files exposed as
 mise generate tool-stub     # Generate a standalone tool stub
 mise install-into <tool> <path>  # Install a tool into a specific path
 mise doctor                 # Diagnose installation issues (mise doctor path)
+mise doctor project         # Run the project's [doctor.checks] diagnostics (--json)
 mise self-update            # Update mise binary
 mise mcp                    # Run mise as a Model Context Protocol (MCP) server
 mise bootstrap              # Provision a whole machine (alias: bs)
 mise oci build|push|run     # Build/inspect OCI container images with mise tools
-mise deps add|install|remove  # Project dependency preparation
+mise deps add|install|remove  # Project dependency preparation (alias: prepare)
 mise en                     # Spawn a sub-shell with the project env loaded
 mise test-tool <tool>       # Verify a tool installs/builds correctly
 mise implode                # Remove mise entirely
+
+# New command groups (2026.9.x)
+mise daemons                # [experimental] Manage project daemons via pitchfork (alias: daemon)
+mise dotfiles | mise dot    # Manage [dotfiles] + the whole history system
+mise skills ls|sync         # Agent skills the active tools ship, from their packslips
+mise packslip pins|forget   # Signers mise accepts packslips from
+mise ssh [DEST] [-- CMD]    # SSH session, optionally borrowing read-only GitHub access
+mise tool-stub <file>       # Execute a tool stub
+mise install --include-lazy # Also provision tools declared lazy = true
+mise reshim --system        # Rebuild system-scoped shims
+mise lock --upgrade         # Migrate a lockfile to revision 2 (dependency graphs)
+mise bootstrap packages export --format nix   # Emit a NixOS module from nix: declarations
+mise bootstrap packages use --no-install      # Record declarations without touching managers
+mise patrons | mise sponsors  # Project supporters
 ```
+
+**`mise ssh` GitHub relay flags:** `--github-relay-read-only` (borrow read-only GitHub access for this session only), `--github-relay-repo <OWNER/REPO>` (repeatable allowlist), `--github-relay-all-repos`, `--github-relay-log-requests` / `--github-relay-no-log-requests`, `--github-relay-log-format <text|jsonl>`, `--github-relay-max-duration <DUR>` (`0s` = session lifetime). Tuned by the `github_relay.*` settings.
 
 `mise use` writes to the **lowest-precedence file in the highest-precedence directory** (so `mise.toml`, not `mise.local.toml`). Target order: `--global` → `--path`/`--file` → `--env` → `MISE_DEFAULT_CONFIG_FILENAME` → first of `MISE_OVERRIDE_CONFIG_FILENAMES` → `mise.toml`.
 
@@ -2533,6 +2838,7 @@ PROJECT_NAME = "{{ cwd | basename }}"
 | `env.*` | HashMap | Current environment variables |
 | `config_root` | PathBuf | Project root for the config file (`~/src/foo/.config/mise/config.toml` → `~/src/foo`) |
 | `cwd` | PathBuf | Current working directory |
+| `config_source` | String | **2026.8.15+.** Absolute path of the config file the template is written in (vs `config_root`, its directory) |
 | `mise_bin` | String | Path to mise binary |
 | `mise_pid` | String | Process ID |
 | `mise_env` | Vec | Configuration environments from `MISE_ENV` (**undefined** if unset; excludes platform envs) |
@@ -2557,7 +2863,7 @@ PROJECT_NAME = "{{ cwd | basename }}"
 | `read_file(path)` | Read file contents. Blocked under `safe = true`. |
 | `range(end, [start], [step_by])` | Integer array |
 | `get_random(start, end, [seed])` | Random integer (`seed` makes it reproducible) |
-| `task_source_files()` | Resolved source file paths (task scripts only); unmatched patterns omitted |
+| `task_source_files([only_changed])` | Resolved source file paths (task scripts only); unmatched patterns omitted. **2026.8.15+:** `only_changed=true` narrows to files changed since the last successful run. |
 | `throw(message)` | Raise error |
 
 **Key Tera filters:**
@@ -2650,6 +2956,10 @@ Supported forms: `$VAR`, `${VAR}`, `${VAR:-default}`, `${VAR:-}`. Expansion runs
 | `preinstall` | Before tool installation | No |
 | `postinstall` | After tool installation (**fires even on no-op installs**) | No |
 
+> **Hooks do not override across config files — they all run.** When the same hook type is defined in several loaded configs, mise runs **every** one, from highest-precedence config to lowest. Within one file, array-form hooks run in listed order. So hooks in `conf.d/a.toml`, `b.toml`, `c.toml` execute as **c, b, a** (later alphabetical fragments have higher precedence).
+
+> `enter` does not re-fire when you `cd` **within** the same project, and `leave` does not fire on internal `cd` either.
+
 ### Syntax
 
 ```toml
@@ -2680,7 +2990,8 @@ echo two
 shell = "bash"
 script = "source completions.sh"   # `scripts = [...]` for multiple
 
-# Task hooks — executed via `mise run`, so the full task system applies
+# Task hooks — executed via `mise run`, so the full task system applies.
+# Works with ALL hook types (cd, enter, leave, preinstall, postinstall).
 [hooks]
 enter = { task = "setup" }
 enter = ["echo 'entering'", { task = "setup" }]  # Mixed syntax
@@ -2693,6 +3004,8 @@ run = "echo 'I also changed directories'"
 ```
 
 `run`/`run_windows` must be **strings** — arrays are unsupported. On Windows mise uses `run_windows` when set; on other platforms a hook with only `run_windows` is skipped.
+
+> ⚠️ **A task used as a `preinstall` hook does NOT auto-install missing tools** — that would defeat the point of running ahead of the install it is preparing. Its commands must already be on PATH. Every other task-backed hook type keeps normal task tool-installation behavior.
 
 `shell` means different things depending on context: on a `run` hook it's an **inline shell command** (include the eval arg: `"bash -c"`, `"pwsh -Command"`); on a `script`/`scripts` hook it's a **shell-name selector** (`bash`, `zsh`, `fish`) and mise only emits the script when the active `mise activate` shell matches.
 
@@ -2727,19 +3040,27 @@ Fields: `patterns` (required glob array), `run`, `task`, `shell` (applies to `ru
 All hooks receive:
 - `MISE_ORIGINAL_CWD` — user's working directory at hook fire
 - `MISE_PROJECT_ROOT` — detected project root
+- `MISE_CONFIG_ROOT` — root of the **config file that defines the hook** (distinct from the project root)
+
+> For a hook in **global** config, both `MISE_PROJECT_ROOT` and `MISE_CONFIG_ROOT` are the global config root, and project hooks don't run.
 
 CD/enter/leave hooks additionally receive:
 - `MISE_PREVIOUS_DIR` — previous directory (only when a directory change occurred)
 
 Config-level `postinstall` receives:
-- `MISE_INSTALLED_TOOLS` — JSON array, e.g. `[{"name":"node","version":"20.10.0"}]`
+- `MISE_INSTALLED_TOOLS` — JSON array of `{name, version, requested_version}`, e.g.
+  `[{"name":"node","version":"20.10.0","requested_version":"lts"}]`. `requested_version` is the **canonical pre-resolution selector** (`latest`, `20`, `lts`, `ref:main` — `ref-main` normalizes to `ref:main`), so a hook can branch without re-reading config.
 
 > A `mise install` that finds nothing to install **still runs `postinstall`**, with `MISE_INSTALLED_TOOLS` set to `[]`. Guard accordingly.
+
+> `preinstall`/`postinstall` run with the **project root as CWD** even when `mise install` was invoked from a subdirectory — the invocation dir is still in `MISE_ORIGINAL_CWD`.
 
 Tool-level `postinstall` additionally receives:
 - `MISE_TOOL_NAME` — tool identifier (e.g., `node`)
 - `MISE_TOOL_VERSION` — installed version
 - `MISE_TOOL_INSTALL_PATH` — installation directory
+- `MISE_CONFIG_FILE` — the exact config file that declared the tool
+- `MISE_CONFIG_ROOT` / `MISE_PROJECT_ROOT`
 - plus that tool's `install_env` values
 
 ### Per-Tool postinstall (not a hook)
@@ -2751,6 +3072,266 @@ Runs immediately after each tool is installed, before other tools in the same se
 node = { version = "22", postinstall = "corepack enable" }
 python = { version = "3.12", postinstall = "pip install pipx" }
 ```
+
+---
+
+## Project Daemons (`[daemons]`)
+
+**Experimental** (requires `experimental = true`) and requires **pitchfork** for process supervision. Added in **2026.9.6** and substantially expanded in **2026.9.12**.
+
+Daemons are processes that keep running *between* task invocations — a database, message broker, or dev server. mise supplies the project configuration and tool environment; pitchfork owns the processes and readiness checks.
+
+```toml
+[settings]
+experimental = true
+
+[tools]
+node = "24"
+
+[daemons]
+postgres = "18"
+
+[tasks.dev]
+daemons = "postgres"
+run = "npm run dev"
+```
+
+`mise run dev` installs missing tools, starts PostgreSQL, waits for readiness, then runs the task. The preset exports `DATABASE_URL` and friends and keeps data between runs. The daemon stays up after the task exits.
+
+### Declaring Daemons
+
+Exactly one declaration style per entry:
+
+| Declaration | Meaning |
+|-------------|---------|
+| `postgres = "18"` | Service preset whose **name matches the key** |
+| `preset = "postgres"` + `version = "18"` | Named instance of a preset, with overrides |
+| `run = "exec npm run dev"` | Custom shell command |
+| `task = "dev:core"` | An existing mise task (optionally with `args`) |
+| `project = "../other"` (+ `name`) | A daemon declared by **another project** |
+
+```toml
+[daemons.api]
+run = "exec npm run dev"
+ready_port = 3000
+
+[daemons.analytics]
+preset = "postgres"
+version = "18"
+port = 5433
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `run` | string | Long-running command. Use `exec` so it receives stop signals directly. Mutually exclusive with `task`/`preset`. |
+| `task` | string | mise task to supervise. `args` requires it. mise is already the entry point, so it is not wrapped again unless `init` is also set. |
+| `args` | string[] | Passed to the task after `--`. Requires `task`. |
+| `preset` | enum | `cockroachdb` \| `nats` \| `postgres` \| `redis` \| `spicedb`. Requires `version`. |
+| `version` | string | Version request for the preset's tool. |
+| `init` | string \| string[] | Idempotent setup run **before** the long-running process, on every start and restart. Shares a shell with the main command. |
+| `mise` | bool | `false` disables the mise tool-environment wrapper for both setup and the main command. |
+| `port` | int \| `"auto"` \| table | Fixed port, or per-worktree allocation. Custom daemons also accept pitchfork's structured port table. |
+| `ports` | table | Overrides for a preset's additional named ports. |
+| `options` | table | Preset-specific options. |
+| `data_dir` | string | Persistent preset data directory, relative to the declaring project root or absolute. Defaults to mise state storage. |
+| `proxy` | string \| bool | Reverse-proxy hostname label; `false` opts out, `true` uses the daemon's name. Only a daemon with a port is routed. |
+| `proxy_tls` | enum | `terminate` \| `passthrough`. |
+
+Readiness is configured with pitchfork's own fields (`ready_port`, `ready_cmd`, `auto`, …), which pass through verbatim. Readiness checks apply **after** `init`, so anything waiting on the daemon also waits for setup.
+
+### Tasks That Require Daemons
+
+```toml
+[daemons]
+postgres = "18"
+redis = "8"
+
+[tasks.test]
+daemons = ["postgres", "redis"]
+run = "npm test"
+```
+
+Use a string for one, a list for several, or `true` for every daemon in the task's project configuration. Already-running daemons are reused. This replaces prerequisite tasks that launch background processes and poll for readiness.
+
+- Startup is part of **dependency handling**: `--skip-deps` and `task.skip_depends` skip it.
+- `--dry-run` validates names and the experimental setting, and reports what would start without starting anything.
+- **Safe mode blocks task daemon startup.**
+- In a monorepo each task resolves daemon names in its own project's hierarchy, including inherited declarations. `true` covers only the project's own daemons — it never reaches into a referenced project.
+- Inspect with `mise tasks info <task>`.
+
+> ⚠️ **Subtasks do not start daemons.** The requirement is honored for tasks a run resolves up front (including their `depends`). A subtask reached through a `run = [{ task = "…" }]` entry is resolved once the run is already executing, so its own `daemons` are **not** started. Declare the requirement on the task you invoke.
+
+> A daemon's `task` is invoked via `mise run`, so that task's `depends` run first — but its own `daemons` are skipped, since starting those would restart this daemon.
+
+### Groups, Namespaces, and Cross-Project Daemons
+
+```toml
+[daemon_groups]
+default = ["postgres", "nats", "core"]
+two-cluster = ["default", "core2"]        # groups expand in place
+
+# equivalent table form
+[daemon_groups.two-cluster]
+daemons = ["default", "core2"]
+```
+
+```bash
+mise daemons start two-cluster
+mise daemons stop --group two-cluster
+```
+
+Members must be daemons or groups **in the same project** — a group can never select outside it. A group name may not repeat a daemon name in the same project, and needs at least one member. `mise daemons start` with no names starts the `default` group when one exists, otherwise every project daemon; `stop` without names always covers every project daemon. A bare positional name selects that project's group first, then a daemon of that name; `--group` only ever selects a group.
+
+```toml
+[daemons_settings]
+namespace = "services"            # fixed pitchfork namespace, else derived from dir name + path hash
+namespace_per_worktree = true     # default; appends a 16-hex suffix in a linked git worktree
+```
+
+A daemon's full ID is `<namespace>/<name>`. Namespace resolution order: `[daemons_settings].namespace` → the project's `pitchfork.toml` → the generated default. Stop the project's daemons before changing its namespace. `[daemons_settings]` **merges per key** across config files (unlike `[daemons.<name>]`, where a higher-precedence declaration replaces the whole definition). **Global and system config cannot set `[daemons_settings]`** — mise ignores those tables with a warning.
+
+```toml
+# run a daemon defined in another checkout
+[daemons.pipeline]
+project = "../mirror-pipeline"
+name = "worker"
+
+[daemons.api]
+run = "npm run dev"
+depends = ["pipeline"]
+```
+
+The referenced checkout must already be **trusted** — `mise run` and `mise daemons start` never trust it for you. A reference table accepts only `project` and `name`, and cannot point at another reference. The imported daemon runs in *its own* project's environment, so a preset's `DATABASE_URL` does **not** join your application's environment. A missing or untrusted checkout drops the import rather than breaking the rest of your config; naming it explicitly fails with the reason.
+
+### Service Presets
+
+Presets supply the command, required tool, readiness check, data directory, and connection variables. **Unix-only.** NATS and SpiceDB also need `curl` on PATH for their HTTP readiness checks.
+
+| Preset | Tool | Default port | Additional listeners | Exports |
+|--------|------|--------------|----------------------|---------|
+| `postgres` | `postgres` | 5432 | — | `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`, `DATABASE_URL` |
+| `redis` | `redis` | 6379 | — | `REDIS_URL` |
+| `cockroachdb` | `cockroach` | 26257 | `http_port` 8080 | `COCKROACH_HOST`, `COCKROACH_URL`, `DATABASE_URL` |
+| `nats` | `nats-server` | 4222 | `monitor_port` 8222 | `NATS_URL`, `NATS_MONITORING_URL` |
+| `spicedb` | `spicedb` | 50051 | `http_port` 8443, `metrics_port` 9090 | `SPICEDB_ENDPOINT`, `SPICEDB_PRESHARED_KEY` |
+
+**Preset options** (`options.*`; file paths resolve relative to the project root, `~/` expands):
+
+- **postgres** — `database` (created on first init; defaults to `postgres`). Uses the `postgres` user with local trust auth.
+- **redis** — append-only persistence; no options.
+- **cockroachdb** — `database` (`"defaultdb"`, names the connection default, does **not** create), `databases` (`[]`, created on first init; `name=region` sets a primary region), `settings` (`[]`, each an assignment like `"sql.defaults.vectorize = 'off'"`, prefixed with `SET CLUSTER SETTING`), `locality`, `max_offset`.
+- **nats** — `jetstream` (`true`), `config` (a config file takes over JetStream/storage and voids `jetstream`), `tls_cert`/`tls_key` (both required to enable TLS; `NATS_URL` then uses `tls://`), `tls_ca` (requires the other two).
+- **spicedb** — `datastore_engine` (`"memory"`), `datastore_uri`, `datastore_daemon` (startup order only — it does **not** make `datastore_uri` follow an automatic port), `preshared_key` (`"mise-dev-key"`). Setting only one of engine/uri is an error. `spicedb migrate head` runs before every start on a persistent datastore.
+
+> 🔴 **Local development only.** Preset defaults use loopback addresses with no authentication or a fixed development key. For shared or untrusted environments, write a custom daemon with real auth and network restrictions.
+
+Options used during **first initialization** (database names, cluster settings) do not modify existing data when changed. An explicit `[tools]` version must satisfy the preset's request (`postgres = "18.1"` satisfies a preset asking for `"18"`); multiple instances sharing a tool must use the same request. Explicit `[env]` values override preset defaults, and when several instances export the same variable the **last declaration wins**.
+
+### Ports and Worktrees
+
+```toml
+[daemons.postgres]
+preset = "postgres"
+version = "18"
+port = "auto"                                  # primary checkout keeps 5432
+
+[daemons.api]
+run = "exec npm run dev -- --port $API_PORT"
+port = { auto = true, base = 3000 }            # base is REQUIRED for custom daemons
+```
+
+| Option | Meaning | Default |
+|--------|---------|---------|
+| `auto` | Enables automatic allocation. Must be `true`. | Required in table form |
+| `base` | Port used by the primary checkout | The preset's default; **required for custom daemons** |
+| `stride` | Spacing between allocation slots | `1` |
+
+There are **511 worktree offsets**. With defaults, PostgreSQL uses 5433–5943 in linked worktrees and Redis 6380–6890. A preset's named ports move with its primary port; a named port you set yourself is used exactly as written. All configured ports must be free — **mise never searches for a free port** — and two daemons in one project cannot share a port (reported at config load). Resolved ports are saved in the project's generated `state.json` and reused; changing `base`/`stride` re-resolves, so restart the daemon.
+
+Custom daemons with a port export `<NAME>_PORT` (uppercased, punctuation → underscores): `[daemons.api]` → `API_PORT`, `[daemons.web-ui]` → `WEB_UI_PORT`. Names that would collide (`web-ui` vs `web_ui`) or start with a digit get no variable and a warning — the daemon still runs, and pitchfork still injects `$PORT`. Independent clones and non-Git projects keep the base port; worktrees of a bare repo all get offsets.
+
+```bash
+mise daemons                 # list configured + previously managed daemons
+mise daemons ls --json       # includes resolved `port` and `port_auto`
+mise daemons start [NAME…]   # installs missing tools
+mise daemons stop | restart | status | logs | tui
+mise daemons register        # prepare for on-demand startup without starting
+mise daemons urls            # each daemon's port and proxy hostname URL
+mise daemons prune           # drop state from deleted project directories
+```
+
+Hostnames are `<proxy>.<project>.<tld>` in the primary checkout and `<proxy>.<worktree>.<project>.<tld>` in a linked worktree.
+
+---
+
+## Project Diagnostics (`[doctor]`)
+
+`mise doctor project` runs named checks from the project's configuration — for requirements tool versions alone cannot establish, like whether a compiler can find a native library or a database accepts connections.
+
+```toml
+[doctor.checks.openssl]
+description = "OpenSSL development files are discoverable"
+run = "pkg-config --exists openssl"
+hint = "Run `mise bootstrap packages apply` to install the declared build dependencies."
+timeout = "5s"
+os = ["linux", "macos"]
+
+[doctor.checks.database]
+description = "PostgreSQL accepts connections"
+run = "pg_isready --quiet"
+```
+
+```bash
+mise doctor project
+mise doctor project --json
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `run` | string | *required* | Diagnostic command. **Exit zero passes**; any other code fails. |
+| `description` | string | the check name | Human-readable requirement |
+| `hint` | string | — | Remediation shown on failure. **Never executed.** |
+| `timeout` | duration | `10s` | Positive duration (`500ms`, `5s`) |
+| `dir` | string | the declaring config's root | Relative paths resolve from that root; `~/` and absolute used as given |
+| `shell` | string | mise's inline task shell | Includes the command flag, e.g. `"bash -c"`, `"pwsh -Command"` |
+| `os` | string \| string[] | run everywhere | Same selectors/aliases as tool filters (`darwin`, `win`, `amd64`, `linux/arm64`). **`os = []` is rejected.** |
+
+- Ordinary `mise doctor` diagnoses mise itself and does **not** run these. Checks never run on directory entry or before a task — there are no implicit checks.
+- Checks run **concurrently**, bounded by `jobs` (`MISE_JOBS`); set `jobs = 1` for sequential. Results stay in name order and a failure doesn't stop the others.
+- A higher-precedence definition **replaces the entire check** of the same name, including its hint and dir.
+- Commands get the project's environment and tool paths. Diagnostics do **not** install tools or run task dependencies/hooks. Checks are **not sandboxed**.
+- Each command has a deadline and a combined **64 KiB** stdout/stderr cap; output is captured and **discarded** so a probe can't print a credential into the report. Use `description`/`hint` to explain; run the command directly for detail.
+- Templates are **not rendered** in `dir`. Checks that apply to the current platform report errors in safe mode. Empty or fully platform-excluded check lists still succeed.
+- Unknown `[doctor]` container options are ignored for forward compatibility; **unknown check fields are rejected** to catch typos.
+- JSON report has `checks` and `errors` arrays; config-loading errors populate top-level `errors` with `checks` empty.
+
+---
+
+## Command Wrappers (`[wrappers]`)
+
+Added **2026.8.16**. Intercept an ordinary command name with a different command, arguments, and environment. Wrappers take precedence over mise-managed tools, and mise **strips its own dispatch directories before delegating**, so the underlying tool still resolves from mise or the system.
+
+```toml
+[wrappers]
+# string shorthand
+rg = "rg-wrapper"
+
+# table form
+[wrappers.cargo]
+command = "mbx"
+args = ["--shim"]                        # inserted BEFORE the intercepted command's arguments
+env = { MBX_CARGO_SHIM_MODE = "1" }
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | string | *Required* in table form. The command to run instead. |
+| `args` | string[] | Arguments inserted **before** the intercepted command's own arguments |
+| `env` | table | Environment variables set for the wrapper |
+
+Works with normal activation, `mise activate --shims`, and `mise exec`. Managed wrapper shims are refreshed by `mise reshim`. There is **no dedicated doc page** — this key exists in the JSON schema and release notes only.
+
+> Related: `activate_shims = false` (`MISE_ACTIVATE_SHIMS`, default `true`, added 2026.9.2) keeps tool shim directories off PATH during activation and hooks without changing auto-install or lazy-tool settings — which lets external command wrappers keep working.
 
 ---
 
@@ -2848,6 +3429,10 @@ mise bootstrap --force-dotfiles   # overwrite conflicting whole-file dotfiles
 mise bootstrap --prompt-secrets   # prompt for [bootstrap.secrets] inputs
 mise bootstrap --only packages,dotfiles
 mise bootstrap --skip macos-defaults
+mise bootstrap --skip-dirty        # 2026.8.13+ skip repos with uncommitted changes
+mise bootstrap --adopt             # adopt an existing setup repo
+                                   # (renamed from --from-git in 2026.9.3;
+                                   #  old spelling warns, REMOVED in 2026.10.0)
 mise bootstrap plan [--json] [--detailed-exitcode]  # 0 = no changes, 2 = changes, 1 = failure
 mise bootstrap status [--json] [--missing]          # non-zero exit when out of sync
 mise bootstrap remote [TARGET]…   # apply config to inventory hosts / SSH destinations
@@ -2897,6 +3482,7 @@ Each phase is runnable on its own: `mise bootstrap packages apply`, `mise bootst
 ### `[bootstrap]` Configuration
 
 ```toml
+# ⚠️ DEPRECATED 2026.9.4 (hidden from help, removal 2027.3.3) — emits a warning.
 # Compose independent config roots (2026.8.9+). Selected roots contribute [dotfiles],
 # [bootstrap.files], [bootstrap.directories], [bootstrap.services], and [bootstrap.compose]
 # without gaining precedence from list or glob order. Identical declarations dedupe;
@@ -2904,19 +3490,37 @@ Each phase is runnable on its own: `mise bootstrap packages apply`, `mise bootst
 [bootstrap]
 config_roots = ["bundles/*"]
 
-# System packages — managers: apk: apt: dnf: pacman: brew: brew-cask: flatpak: flatpak-user: mas:
+# System packages — managers: apk: apt: aur: brew: brew-cask: dnf: flatpak: flatpak-user:
+#   macos-app: mas: nix: pacman: scoop: winget: zypper:
 [bootstrap.packages]
 "apt:build-essential" = "latest"
 "apk:curl" = "*"                    # Alpine apk (version: "@2.45.2-r0" form)
-"brew:postgresql@17" = "latest"
+"brew:postgresql@17" = "latest"     # resolves formula aliases such as `openssl`
 "brew-cask:firefox" = "latest"      # app-bundle casks, no local Homebrew required
 "flatpak:org.gimp.GIMP" = "latest"  # system-scoped
 "flatpak-user:org.gimp.GIMP" = "latest"   # 2026.8.3+ per-user scope; both may coexist
 "mas:497799835" = "latest"          # Mac App Store apps by ADAM ID
+"aur:yay-bin" = "latest"            # 2026.9.2+ Arch User Repository via yay (preferred) or paru
+"winget:Microsoft.PowerShell" = "latest"  # 2026.9.3+ Windows, exact package ID
+"nix:ripgrep" = "latest"            # 2026.9.4+ Linux/macOS, applied through your Nix profile
+"scoop:extras/vscode" = "latest"    # 2026.9.12+ Windows, adds the bucket if missing
+"zypper:gcc" = "latest"             # 2026.9.12+ openSUSE / SLE
+
+# 2026.9.11+ macOS .app from a vendor/internal download.
+# version, url, sha256, artifact are ALL required — "latest" is rejected.
+[bootstrap.packages."macos-app:example"]
+version = "1.2.3"
+url = "https://example.com/Example-{{version}}.dmg"
+sha256 = "…"
+artifact = "Example.app"
 
 # Table form with version + [tools]-style os selectors (2026.8.4+).
 # Platform-incompatible packages surface as unavailable instead of aborting the run.
 "brew-cask:font-hack-nerd-font" = { version = "latest", os = ["macos", "linux"] }
+
+# 2026.9.4+ `env` selector gates an entry on the active mise environment
+"apt:postgresql-client" = { version = "latest", env = ["ci", "staging"] }
+"apt:build-essential" = { version = "latest", state = "absent" }   # declare removal
 
 [bootstrap.brew]
 adopt = true                        # adopt existing app bundles globally (per-cask: adopt = true)
@@ -2934,6 +3538,8 @@ owner = "root"
 group = "root"
 mode = "0644"
 notify = ["example"]
+phase = "pre-packages"   # 2026.9.5+ — converge this file BEFORE packages install
+                         # (also valid on [bootstrap.directories])
 
 # Linux accounts — converge BEFORE the files that reference them; UID/GID collisions fail closed
 [bootstrap.users.deploy]
@@ -2943,10 +3549,16 @@ state = "present"                   # or "absent"
 [bootstrap.groups.deploy]
 state = "present"
 
-# Linux system services — running/stopped, enabled/disabled, masked
+# Services — running/stopped, enabled/disabled, masked
 [bootstrap.services.nginx]
 state = "running"
 enabled = true
+# full field set: builtin, command, description, enabled, environment, masked,
+#                 on_change, requires_tools, restart, scope, state, working_directory
+
+# `builtin` selects a mise-provided service — e.g. the dotfiles history watcher
+[bootstrap.services.mise-history]
+builtin = "history-watch"
 
 # Docker Compose projects (Compose v2 only) — convergence compares live container
 # runtime and health against the rendered Compose model
@@ -2986,6 +3598,7 @@ fish = "activate"
 autohide = true
 orientation = "left"
 tilesize = 48
+apps = ["/Applications/Ghostty.app", "/Applications/Firefox.app"]   # 2026.9.6+
 
 [bootstrap.macos.finder]
 show_pathbar = true
@@ -3001,12 +3614,23 @@ tap_to_click = true
 [bootstrap.macos.defaults]
 "com.apple.finder" = { AppleShowAllFiles = true }
 
+# 2026.9.5+ superset of [bootstrap.macos.defaults] — adds host/path targeting
+[[bootstrap.macos.defaults_entries]]
+domain = "com.apple.finder"
+key = "AppleShowAllFiles"
+value = true
+# host = "currentHost"
+# path = "~/Library/Preferences/com.example.plist"
+
 # Services (launchd on macOS, systemd on Linux)
 [bootstrap.macos.launchd.agents.my-sync]
 program = "~/.local/bin/my-sync"
 args = ["--watch"]
 run_at_load = true
 start_calendar_interval = { hour = 3, minute = 30 }
+process_type = "Background"   # 2026.9.12+ → launchd ProcessType:
+                              # Background | Standard | Adaptive | Interactive
+                              # misspellings are REJECTED at config time
 
 [bootstrap.linux.systemd.units.my-sync]
 description = "sync files"
@@ -3094,7 +3718,7 @@ mise bootstrap remote --prompt-secrets --keep-staging
 
 Manage dotfiles declaratively; applied during `mise bootstrap` (step 8) or standalone via `mise bootstrap dotfiles apply`. **Stable since v2026.7.4.** Entries are keyed by target path.
 
-> 🔴 **Renamed (2026.7.16):** the top-level `mise dotfiles` command is **deprecated and hidden from help**. Use **`mise bootstrap dotfiles`** — only that form runs the `pre-dotfiles`/`post-dotfiles` hooks correctly. The old command persists as a hidden compatibility alias: **warns from 2027.2.0, removed 2028.2.0**.
+> 🔴 **Un-deprecated (2026.9.8) — reversal of the 2026.7.16 note.** The top-level **`mise dotfiles` command is first-class again**, with the short alias **`mise dot`**. Verified on 2026.9.12: it is visible in `mise --help`, emits **no deprecation warning**, and exposes the same subcommand set as `mise bootstrap dotfiles` — plus the whole history system (`save`, `history`, `rollback`, `undo`, `track`, `sync`, `origin`, `watch`, `conflicts`, `capture`, `recover`, `paths`, `pull`, `exclude`, `include`). mise's own output now recommends `mise dot save` and `mise dot origin set`. Both spellings work; **prefer `mise dot`** for history operations and either for apply/status.
 
 ```toml
 [settings]
@@ -3112,9 +3736,31 @@ dotfiles.default_mode = "symlink"  # symlink|symlink-each|copy|template
                                                   # cannot combine with source/mode/exclude
 # Block / line edits to files mise does NOT own (key = target/edit-id)
 "~/.zshrc/activate" = { block = 'eval "$(mise activate zsh)"' }
-"/etc/hosts/dev" = { line = "127.0.0.1 dev.local" }
+"/etc/hosts/dev" = { line = "127.0.0.1 dev.local", position = "prepend" }  # append (default) | prepend
 "~/.gitconfig/identity" = { source = "snippets/git-identity.tmpl", template = "tera" }
+
+# Encrypt tracked contents in Git; the LIVE file stays plaintext
+"~/.config/app/token" = { source = "dotfiles/token", encrypt = true }
+
+# Select managed files from a directory via its git manifest (copy / symlink-each only)
+"~/.config/nvim" = { source = "dotfiles/nvim", mode = "symlink-each", manifest = "git" }
+
+# Per-OS / per-profile variants
+[[dotfiles."~/.gitconfig".variants]]
+os = ["macos"]
+target = "~/.gitconfig-mac"
+[[dotfiles."~/.gitconfig".variants]]
+profile = "work"
+default = true
 ```
+
+**Entry fields:** `source` · `content` · `mode` · `exclude` · `manifest` (`"git"`) · `block` · `line` · `position` (`append` \| `prepend`) · `template` (`"tera"`) · `comment` · `encrypt` · `variants` (each `{ os?, profile?, default?, target? }`).
+
+- `encrypt = true` stores encrypted contents in Git while the live file stays plaintext. Not combinable with `content`/`block`/`line`/`template`. Shared recipients come from `[history].encryption.recipients`.
+- `variants` are history **streams** in track mode, or optional **destinations** in deployment modes. A variant `target` needs an explicit `source` (or a safe relative entry key when every variant has a target) and is **not supported in track mode**.
+- Templates (`mode = "template"`) can reference `[bootstrap.secrets]` via `{{ secret(name="…") }}` (2026.9.7+). Commands that render templates (`add`, `apply`, `diff`, `edit`, `status`, `unapply`) accept `--prompt-secrets`; without a value, rendering **fails closed**. Textual diffs redact resolved secret values.
+
+> 🔒 `mise oci build` renders dotfile templates with a **restricted engine**: `secret()` is rejected and the `env` context, `get_env()`, `exec()`, and `read_file()` are unavailable, so ambient credentials cannot be baked into a publishable image layer.
 
 **Modes:** `symlink` (default; one link for a file or whole directory) · `symlink-each` (directory source → per-file links, so the target dir can also hold unmanaged files; supports `exclude` globs, prunes stale mise-managed links, and records exact source→target pairs in a manifest under `$MISE_STATE_DIR/dotfiles` rather than recursively walking shared targets like `~`) · `copy` (a real file/dir; additive for directories and **never pruned**) · `template` (render the source through mise's Tera engine with `env`, `vars`, `exec()`; permissions mirror the source and are repaired on drift).
 
@@ -3123,14 +3769,118 @@ dotfiles.default_mode = "symlink"  # symlink|symlink-each|copy|template
 **Block edits** wrap content in marker comments (`# >>> mise:id >>>` … `# <<< mise:id <<<`); the comment style is inferred per file type (`#`, `--`, `//`, `;`, `"`) and can be overridden with `comment`. Strict JSON/XML cannot use blocks. **Line edits** append a single line if absent and never modify other content. Edit IDs allow letters, digits, `_`, `-`, `.`. A table with `source` + `template = "tera"` is unambiguously an edit; a table with only `source` is a whole-file entry.
 
 ```bash
-mise bootstrap dotfiles status [--missing] [--json]   # applied/missing/differs/source missing
-mise bootstrap dotfiles apply [--dry-run] [--verbose] [--yes] [--force]
-mise bootstrap dotfiles add ~/.zshrc [--no-apply]     # capture a live file (applies by default)
-mise bootstrap dotfiles edit [--apply] ~/.zshrc
-mise bootstrap dotfiles unapply                       # remove managed links/copies/templates/blocks
+mise dot status [--missing] [--json]        # applied/missing/differs/source missing (alias: ls)
+mise dot apply [--dry-run] [--verbose] [--yes] [--force]
+mise dot add ~/.zshrc [--no-apply]          # capture a live file (applies by default)
+mise dot diff                               # changes needed to apply
+mise dot edit [--apply] ~/.zshrc
+mise dot unapply                            # remove managed links/copies/templates/blocks
+mise dot conflicts [PATH…] [--difftool]     # 2026.9.7+ inspect local vs remote before resolving
+mise dot recover                            # recover an interrupted dotfile operation
 ```
 
+`mise bootstrap dotfiles <same subcommand>` is equivalent; both run the `pre-dotfiles`/`post-dotfiles` hooks.
+
+`conflicts` is read-only — a unified diff including file-mode changes by default, `--difftool` opens the configured Git `diff.tool` (falling back to `merge.tool`), `--tool <name>` picks one. Encrypted contents decrypt only into private temporary files, and inspection never modifies either side or marks the conflict resolved. Resolve with `--take-remote` or `--keep-local`.
+
 Dotfiles are **manual-only** — never applied implicitly by `mise install` or `mise bootstrap packages`. A regular file whose content already matches its source converges to a symlink without `--force`; a genuine conflict needs `--force`. `--dry-run` promises to execute nothing, so it **skips template rendering** and lists those entries as `(if changed)`. On Windows, file symlinks fall back to copies (directories use junctions). Removing a config entry leaves files in place — cleanup is manual (or use `unapply`).
+
+### Dotfiles History (`mise dot` / `[history]`)
+
+mise saves versions of tracked configuration files as **ordinary Git commits** ("checkpoints") so you can inspect changes and restore an earlier version. History stays **local** until you connect a remote setup repository.
+
+```bash
+mise dot track ~/.zshrc                       # tracks and saves the first version immediately
+mise dot track ~/.config/app/state.json --no-autosave
+mise dot save ~/.zshrc                        # save one file
+mise dot save --description "before theme change"   # save all tracked files
+mise dot untrack ~/.zshrc
+mise dot paths [--noisy]                      # what history tracks, and under which policies
+```
+
+An ordinary `save` with no changes creates no commit; supplying `--description`, `--label`, or `--task` creates a checkpoint anyway. `save` **fails** if it can't save anything (Git missing, history disabled, path untracked) — use `--best-effort` in scripts to warn and continue.
+
+**The watcher** is a background service saving changes made by any editor or command — a systemd user service on Linux, a LaunchAgent on macOS, a Scheduled Task on Windows:
+
+```toml
+[bootstrap.services.mise-history]
+builtin = "history-watch"
+```
+
+```bash
+mise bootstrap services apply
+mise dot status
+mise dot watch --once
+```
+
+**Comparing and restoring:**
+
+```bash
+mise dot history [--path ~/.zshrc]            # checkpoints, newest first
+mise dot history show 12 [--files] [--json]
+mise dot history diff 12 --patch --path ~/.zshrc
+mise dot history diff 11 12 --patch           # between two checkpoints
+mise dot history diff --path ~/.zshrc         # current file vs latest saved (add --exit-code)
+mise dot rollback ~/.zshrc [--dry-run]
+mise dot rollback --to latest~3 --all --dry-run
+mise dot undo                                 # reverse the tracked-file changes of an operation
+```
+
+| Reference | Meaning |
+|-----------|---------|
+| `12` | Checkpoint with local ID 12 |
+| `latest` | Most recent checkpoint |
+| `latest~N` | N checkpoints back (with `--path`, counts only checkpoints where that path changed) |
+| `commit:<sha>` | Git commit by full hash or unambiguous prefix |
+
+Numeric IDs are **local and may change** if mise rebuilds its index — use a Git commit hash for a stable reference. Rollback saves current contents first, so `undo` can reverse it; both create new commits, so earlier versions stay available. `--all` selects everything in the chosen checkpoint, and a checkpoint that recorded a file as **absent** makes rollback **delete** it. Preview actions are `write` (replace with different saved contents) and `delete`.
+
+**Sharing** connects a setup repository:
+
+```bash
+mise dot origin set <url>
+mise dot sync                                  # publish, fetch, record what is pending
+mise dot pull                                  # pull incoming shared changes into live files
+```
+
+**`[history]` configuration:**
+
+```toml
+[history]
+exclude = ["**/*.log", "!important.log"]       # a !glob re-includes a path an earlier glob excluded
+
+[history.encryption]
+recipients = ["age1…", "ssh-ed25519 AAAA…"]    # shared age/SSH/age-plugin recipients
+
+[history.reload]
+"~/.zshrc" = "exec zsh"                        # run once after a rollback/undo writes a matching path
+                                               # (trusted GLOBAL or SYSTEM config only)
+
+[history.origin]                               # machine-local; written by `mise dot origin set`
+url = "git@github.com:me/setup.git"
+branch = "main"
+```
+
+**`[settings.history]`:**
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `enabled` | `true` | Record Git commits for tracked files around bootstrap operations and on explicit saves |
+| `sync` | `"sync"` | What the watcher does with a connected setup repo on its own |
+| `sync_interval` | `"5m"` | How soon after a save the watcher publishes, at most this often |
+| `fetch_interval` | `"15m"` | How often the watcher fetches the origin branch (values below 1s use 1s) |
+| `notify` | `true` | Desktop notification when conflicts pause sharing (retries stay silent) |
+| `allow_plaintext_history` | `false` | Allow publishing history containing unencrypted versions of files now marked for encryption |
+| `describe_command` | `""` | Command that names commits the watcher saves (an agent, say); gets one JSON object on stdin |
+| `watch.debounce` | `"2s"` | Quiet period before the watcher saves a changed file |
+| `watch.max_interval` | `"24h"` | Longest autosave interval a constantly-changing file is stretched to |
+| `watch.reconcile` | `"10m"` | Full rescan for missed changes (`0` disables periodic reconciliation) |
+
+Ordinary edits are saved after ~2s of quiet; constantly-changing files are stretched on their own schedule (doubling up to `max_interval`) and never delay the others. Explicit `save` is always immediate.
+
+> 🔒 **`history.describe_command` is global-only (2026.9.7 security fix).** An implicitly trusted project could previously set it and have a later checkpoint execute the project-controlled command with **unencrypted tracked-file diffs**. It is now honored only from system/global config or `MISE_HISTORY_DESCRIBE_COMMAND`; project values are ignored with a warning.
+
+> Logs, caches, databases, and session state usually belong **outside** tracked files. For a file you want saved only on request, track it with `--no-autosave` and use explicit `mise dot save`.
 
 ---
 
@@ -3185,6 +3935,8 @@ Config files in per-directory precedence order (highest first):
 
 Any can also appear as dotfiles (`.mise.toml`, etc.).
 
+Since **2026.8.13** a **visible** `mise/conf.d/*.toml` is supported alongside the hidden `.mise/conf.d/*.toml`.
+
 **`conf.d` fragments (2026.8.7 / 2026.8.9):** project-level `conf.d` directories are supported, and fragments can be environment-specific — `.mise/conf.d/*.{env}.toml` (plus `.local` variants) load only when that configuration environment is active. This applies to project, global, and system `conf.d` directories, and is gated by the `env_conf_d` setting.
 
 > 🔴 **Breaking (2026.8.9):** a `conf.d` fragment with **an extra dot before `.toml` is now interpreted as environment-specific**. `node.tools.toml` is read as environment `tools`, not as an unconditional fragment. **Use hyphens for multi-word fragment names** — `node-tools.toml`.
@@ -3215,8 +3967,16 @@ mise searches upward from cwd to root (stops at `MISE_CEILING_PATHS`). Merge beh
 **Useful commands:**
 ```bash
 mise cfg / mise config     # Show loaded files in precedence order
+mise config get|ls|set     # Read/write individual config keys
+mise config set --append  redactions '*_TOKEN'   # 2026.8.15+ list-key append
+mise config set --remove  redactions '*_TOKEN'   # 2026.8.15+ list-key remove
+mise config set --global|--system <key> <value>  # 2026.8.15+ explicit scope targeting
 mise ls --current          # Active versions with overrides
 mise doctor                # Diagnose setup issues
+mise doctor project        # Run this project's [doctor.checks]
+mise fmt                   # Format mise.toml — 2026.9.6+ also SORTS certain list values
+                           # (redactions, task sources/outputs, task_config.global_inputs,
+                           #  input_groups) by defined rules
 ```
 
 **`.tool-versions` format:**
@@ -3242,6 +4002,9 @@ mise settings add idiomatic_version_file_enable_tools dagger task lefthook
 Supported files include `.nvmrc`, `.node-version`, `package.json`, `.python-version`, `.python-versions`, `.ruby-version`, `Gemfile`, `.go-version`, `go.mod`, `rust-toolchain.toml`, `.java-version`, `.sdkmanrc`, `global.json`, `.terraform-version`, `.bun-version`, `.deno-version`.
 
 - **`go.mod` (2026.7.13+):** a `toolchain goX.Y.Z` directive is an exact pin; a `go X.Y` minimum resolves to the latest matching patch.
+- **`go.work` (2026.9.12+):** with `go` enabled, an active `go.work`'s `toolchain` line selects the Go version and — as with the `go` command — member `go.mod` files are **ignored in workspace mode**. `GOWORK` (`auto`, `off`, or an absolute path) is honored.
+- **`.bazelversion` (2026.9.12+):** an idiomatic version file for `bazel` when enabled. Only **concrete releases** are read — `latest`, `last_green`, `8.x`, and commit hashes select nothing rather than failing.
+- **`idiomatic_version_file_ignore_minimum_versions`** (bool, default `false`) ignores idiomatic fields that declare only a *minimum* compatible version.
 - **Structured parsers (2026.7.15+):** registry `idiomatic_files` entries support `version_regex`, `version_json_path`, and `version_expr`, giving **in-process parsing with no plugin or shell execution** for 11 tools — Dagger, Task, chezmoi, CMake, Earthly, golangci-lint, GoReleaser, Lefthook, Pixi, pre-commit, Ruff (`dagger.json`, `Taskfile.yml`, `.chezmoiversion`, …).
 - **Disable individual files per tool (2026.7.17+)** with `tool:filename` pairs — e.g. keep `.nvmrc` selecting Node while stopping node from reading `devEngines.runtime` in `package.json`, with pnpm still reading it:
   ```bash
@@ -3251,7 +4014,7 @@ Supported files include `.nvmrc`, `.node-version`, `package.json`, `.python-vers
 
 ### Key Settings Reference
 
-mise ships **287 settings** (counted recursively from `settings.toml`, the code+docs generator — note `mise settings --all` prints only the ~169 that resolve to a value, omitting unset optional ones). This is a representative subset — run `mise settings --all` (or `mise settings ls`) for the live list, and `mise settings set <key> <value>` / `mise settings get <key>` to manage them.
+mise ships **≈324 settings** (leaf count from `https://mise.jdx.dev/schema/mise.json` on 2026.9.12: 167 top-level keys, 36 of which are nested namespaces — note `mise settings --all` prints only the ~198 that resolve to a value, omitting unset optional ones). This is a representative subset — run `mise settings --all` (or `mise settings ls`) for the live list, and `mise settings set <key> <value>` / `mise settings get <key>` to manage them.
 
 ```toml
 [settings]
@@ -3312,7 +4075,8 @@ slsa = true                 # SLSA provenance verification
 github_attestations = true  # GitHub Artifact Attestations
 provenance_api_failures_fatal = true  # Treat provenance API failures as install errors
 netrc = true                # Honor ~/.netrc for HTTP auth (netrc_file overrides path)
-minimum_release_age = ""    # UNSET by default — opt in, e.g. "7d"
+minimum_release_age = "7d"  # built-in default is 24h when unset (timestamp-reporting
+                            # backends only); "0s" disables
 minimum_release_age_excludes = []  # Tools exempt from the release-age delay
 locked_verify_provenance = false   # Re-verify at install (auto-on with paranoid)
 not_found_system_fallback = true   # false = shim for a missing tool fails loudly
@@ -3324,7 +4088,9 @@ gix = true                  # Use gix for git operations (false = shell out to g
 libgit2 = true              # Use libgit2 for git operations
 auto_update = false         # Opt-in self-update before interactive commands
 auto_update_check_duration = "7d"
-upgrade.auto_prune = true   # mise upgrade removes the version it replaced
+upgrade.auto_prune = true   # 2026.8.15+: removal is now DEFERRED, not immediate —
+                            # the replaced version is kept for upgrade.prune_after
+upgrade.prune_after = "24h" # grace period before a replaced version is auto-pruned
 
 # Sandbox (deny-by-default policy)
 [settings.sandbox]
@@ -3449,9 +4215,32 @@ root = "~/.dotfiles"
 sudo = true                 # set managers = [...] to pick package managers
 ```
 
-**Nested namespaces (29):** `age`, `aqua`, `cargo`, `conda`, `dotfiles`, `dotnet`, `erlang`, `forgejo`, `github`, `gitlab`, `go`, `hook_env`, `java`, `node`, `npm`, `oci`, `pipx`, `python`, `ruby`, `rust`, `sandbox`, `sops`, `spm`, `status`, `swift`, `system_packages`, `task`, `upgrade`, `zig`. (`task.cache` nests one level deeper.)
+**Nested namespaces (36):** `age`, `aqua`, `cargo`, `conda`, `dotfiles`, `dotnet`, `erlang`, `forgejo`, `github`, **`github_relay`**, `gitlab`, `go`, **`history`**, `hook_env`, `java`, `node`, `npm`, `oci`, **`packslip`**, `pipx`, **`pypi`**, `python`, `ruby`, `rust`, `sandbox`, **`self_update`**, **`shims`**, **`skills`**, `sops`, `spm`, `status`, `swift`, `system_packages`, `task`, `upgrade`, `zig`. (`task.cache` and `history.watch` nest one level deeper.) **Bold = new since 2026.8.x.**
 
-**Global-config-only settings (15)** — ignored when set from project config: `ci`, `forgejo.credential_command`, `github.credential_command`, `gitlab.credential_command`, `paranoid`, `safe`, `task.cache_remote_oidc_audience`, `task.cache_remote_token`, `task.cache_remote_token_file`, `trusted_config_paths`, `unix_default_file_shell_args`, `unix_default_inline_shell_args`, `windows_default_file_shell_args`, `windows_default_inline_shell_args`, `yes`.
+**Notable new top-level settings:**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `activate_shims` | bool | `true` | `false` keeps tool shim dirs off PATH during activation and hooks (2026.9.2+), so external [command wrappers](#command-wrappers-wrappers) keep working |
+| `shims_dir` / `system_shims_dir` / `system_installs_dir` | path | — | Shim/install locations for system-scoped and collocated layouts (2026.9.0+) |
+| `shims.exclude` | string[] | `[]` | Command names mise should **never** create shims for, leaving them to the system (2026.9.10+) |
+| `lockfile_mode` | enum | `merge` | `merge` (incremental) or `generate` (**experimental** — complete lockfile generation). In `generate` mode `provenance_verified` is **no longer treated as a trust signal**. |
+| `locked_scopes` | string[] | `["global","project","system"]` | Config scopes where invocation-wide `locked` mode is enforced |
+| `no_env` | bool | unset | Do not load env vars from config files (matches `--no-env`) |
+| `no_hooks` | bool | unset | Do not execute hooks from config files (matches `--no-hooks`) |
+| `task.quiet` | bool | `false` | Suppress mise's own output while executing tasks |
+| `upgrade.prune_after` | duration | `"24h"` | Grace period before versions replaced by `mise upgrade` are auto-pruned |
+| `idiomatic_version_file_ignore_minimum_versions` | bool | `false` | Ignore idiomatic version-file fields that only declare a **minimum** compatible version |
+| `truncate` | bool | `true` | Terminal-width truncation; `--truncate`/`--no-truncate` override. **Auto-disabled when a coding agent is detected** (2026.9.6+) |
+| `disable_update_warning` | bool | `false` | Suppress the "a newer mise is available" warning (2026.9.5+) |
+| `disable_hints` | string[] | `[]` | Silence specific hint messages by name |
+| `self_update.repository` / `self_update.api_url` | string | `jdx/mise` / `https://api.github.com` | Source used by `mise self-update` |
+| `github_relay.*` | — | — | `concurrency` (`8`, 1–32, excess fails closed), `request_timeout` (`5m`), `max_duration` (`0s` = session lifetime), `log_requests` (`false`), `log_format` (`text`\|`jsonl`) — for [`mise ssh`](#cli-commands-for-tools) borrowed GitHub access |
+| `packslip.exec` / `packslip.stampers` | bool / array | `false` / unset | See [Packslip Backend](#packslip-backend-preferred-where-available) |
+| `skills.*` | — | — | See [Agent Skills](#packslip-man-pages-and-agent-skills) |
+| `history.*` | — | — | See [Dotfiles History](#dotfiles-history-mise-dot--history) |
+
+**Global-config-only settings (16)** — ignored when set from project config: `ci`, `forgejo.credential_command`, `github.credential_command`, `gitlab.credential_command`, **`history.describe_command`** (global-only since 2026.9.7, a security fix), `paranoid`, `safe`, `task.cache_remote_oidc_audience`, `task.cache_remote_token`, `task.cache_remote_token_file`, `trusted_config_paths`, `unix_default_file_shell_args`, `unix_default_inline_shell_args`, `windows_default_file_shell_args`, `windows_default_inline_shell_args`, `yes`. `[daemons_settings]` is likewise **ignored from global/system config** (the inverse restriction).
 
 > **`gpg_verify` behavior (2026.7.12+):** GPG verification **always runs** when enabled, with Node/Swift signatures verified in-process via rPGP (no external `gpg` binary). Previously a missing `gpg` silently skipped verification — you must now set `gpg_verify = false` explicitly to opt out.
 
@@ -3485,9 +4274,9 @@ Tasks automatically receive:
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: jdx/mise-action@v4      # latest v4.2.4 (2026-08-01); v4 is the current major
+- uses: jdx/mise-action@v4      # latest v4.3.0 (2026-08-25); v4 is the current major
   with:
-    version: 2026.8.1     # mise version (default: latest)
+    version: 2026.9.12    # mise version (default: latest)
     install: true         # run `mise install`
     install_args: "bun"   # extra args to `mise install`
     bootstrap: false      # run `mise bootstrap` instead of `mise install`
@@ -3525,6 +4314,21 @@ script:
   - mise install
   - mise exec --command 'npm build'
 ```
+
+**Official Docker images (2026.9.12+)** — `ghcr.io/jdx/mise` and `jdxcode/mise`, for `linux/amd64` and `linux/arm64`, built from the **minisign-verified release binaries**:
+
+| Tag | Contents |
+|-----|----------|
+| `2026.9.12`, `2026.9`, `latest` | **scratch** image (static binary + CA certificates, **no shell**) — intended for `COPY --from=` |
+| `debian`, `*-debian` | Debian slim base with `curl` and `git` |
+| `dev` | Unsupported source-built image |
+
+```Dockerfile
+FROM debian:13-slim
+COPY --from=ghcr.io/jdx/mise:2026.9.12 /usr/local/bin/mise /usr/local/bin/mise
+```
+
+> 🔴 **Breaking (2026.9.12):** `:latest` is now the **scratch** image, not a usable base. CI and dev-container users should switch to the `debian` tag and install tools explicitly.
 
 **Generic CI bootstrap:**
 ```bash
@@ -3786,6 +4590,7 @@ Defaults are `HEAD~1` / `HEAD`; `MISE_AFFECTED_BASE` / `MISE_AFFECTED_HEAD` over
 |---------|------|------------|
 | **2026.9.0** (warn) | Hook `script`/`scripts` *spawned* table form | `run` (removal 2027.3.0) |
 | **2026.10.0** (warn) | `tera_v1` setting; Tera v1 compat helpers; `install_before` | Tera v2 syntax; `minimum_release_age` |
+| **2026.10.0** ⚠️ **soonest** | `mise bootstrap --from-git` / `mise bootstrap remote --from-git` (deprecated 2026.9.3, warns as a hidden alias) | `--adopt` |
 | **2026.11.0** (warn) | `credential_command` legacy single positional argument; `*.default_packages_file`; `dotnet.package_flags` | `MISE_CREDENTIAL_HOST`/`MISE_CREDENTIAL_PROVIDER`; tool-level `postinstall`; `prerelease` option |
 | **2026.11.0** | `go.mod` `go X.Y` and `CMakeLists.txt` `cmake_minimum_required` version **floors** stop being read (warn since 2026.8.11). `toolchain goX.Y.Z` unaffected. | Pin an exact version |
 | **2026.12.0** | `shorthands_file` · `env.mise.*` namespace · `value`/`values` keys in `_.file`/`_.path`/`_.source` | `[plugins]` · `env._.*` · `path` (string or array) |
@@ -3797,8 +4602,11 @@ Defaults are `HEAD~1` / `HEAD`; `MISE_AFFECTED_BASE` / `MISE_AFFECTED_HEAD` over
 | **2027.5.0** | Tera task-arg functions `{{arg()}}`, `{{option()}}`, `{{flag()}}` in run scripts | `usage` spec + `$usage_*` |
 | **~2027.7.0** | `[tools] python = { virtualenv = … }` tool option | `env._.python.venv` |
 | **2027.8.0** | Automatic `all_compile = true` distro defaults on **NixOS** (warn 2026.8.6) and **Alpine** (warn 2026.8.11) | Enable `nix-ld`, or set `all_compile = true` explicitly |
+| **2027.3.3** | `[bootstrap].config_roots` and `mise bootstrap config-roots` (deprecated + hidden from help in **2026.9.4**; still works during the window, with a warning) | Per the migration guidance the warning points to |
 | **2027.8.5** | `-l` as the `--bump` shorthand on `upgrade`/`outdated` (so `-l` can later mean `--local`) | `-b` / `--bump` |
+| **2027.8.14** | Task/`[task_config]` `rust_cache` — already a **no-op** | [mbx](https://mr-boxington.jdx.dev/getting-started) |
 | **2027.9.0** | `mise generate bootstrap` | `mise generate install-script` |
+| **2027.9.3** | Task `output = "quiet"` mode (deprecated **2026.9.4**) | Explicit output style + the `task.quiet` setting / `MISE_TASK_QUIET` |
 | **2027.10.0** | `install_before` | `minimum_release_age` |
 | **2027.11.0** | `credential_command` positional arg; `*.default_packages_file`; `dotnet.package_flags` | see above |
 | **2027.12.0** | `experimental_monorepo_root`; `aqua.registry_url` | `monorepo_root`; `aqua.registries` |
@@ -3808,7 +4616,7 @@ Defaults are `HEAD~1` / `HEAD`; `MISE_AFFECTED_BASE` / `MISE_AFFECTED_HEAD` over
 
 **Recent default changes:** `ruby.compile` now defaults to **precompiled binaries** (2026.8.0), and since **2026.8.2** `ruby.compile = false` is a *strict precompiled-only* mode — installs error with `no precompiled ruby found` instead of falling back to ruby-build, and version listings are filtered to versions with a precompiled binary for your platform (unset and `true` unchanged; Windows unaffected) · `windows_powershell_no_profile` → `true` (2026.7.13) · structured env-file values are **literal by default** again (2026.7.14) · `cargo.binstall_quickinstall` = `false`.
 
-> **Correction:** `minimum_release_age` is **not** `24h` — it is unset by default. Verified against `settings.toml` (`optional`, no `default`) and `mise settings get` on 2026.8.12.
+> **`minimum_release_age` has a built-in `24h` default** applied when the setting is unset, on timestamp-reporting backends (aqua, cargo, core, forgejo, gem, github, gitlab, go, npm, packslip, pipx/pypi, spm, ubi). `mise settings get` reporting it "not set" and the schema carrying no `default` are both true and both misleading — `settings.toml` uses `default_docs = "24h"`, and the constant `DEFAULT_MINIMUM_RELEASE_AGE = "24h"` lives in mise's source. Use `"0s"` to actually disable it.
 
 **Other breaking changes in the 2026.8.x line:**
 - **2026.8.5** — `disable_tools = ["python"]` no longer activates a `_.python.venv`. The venv stays on disk and is restored when Python is re-enabled.
@@ -3854,7 +4662,7 @@ Defaults are `HEAD~1` / `HEAD`; `MISE_AFFECTED_BASE` / `MISE_AFFECTED_HEAD` over
 - Use shims in `.zprofile`/`.bash_profile` and PATH activation in `.zshrc`/`.bashrc`
 - Use `[tool_alias]` (not deprecated `[alias]`)
 - Pin tool versions with `mise.lock`; prefer **`[tool_config] locked = true`** for config-root scope over the invocation-wide `locked` setting
-- Opt into `minimum_release_age` (e.g. `"7d"`) for supply-chain delay — it is **not** on by default
+- Remember `minimum_release_age` is **already on at 24h** by default for most backends; raise it (e.g. `"7d"`) to harden, or set `"0s"` to opt out — don't assume unset means off
 - Use `group` to express "exactly one of these flags" instead of hand-rolling the check in the script
 - Use `version_order = "semver"` on aqua/github/gitlab/forgejo/http tools whose releases include backport lines
 - Use `mise lock --bump` to advance fuzzy selectors without touching `mise.toml`
@@ -3864,7 +4672,18 @@ Defaults are `HEAD~1` / `HEAD`; `MISE_AFFECTED_BASE` / `MISE_AFFECTED_HEAD` over
 - Declare `[monorepo].config_roots` explicitly instead of relying on filesystem walking
 - Use `mise run --affected` in monorepo CI to skip untouched projects
 - Use `mise bootstrap` with `[bootstrap]`/`[dotfiles]` to onboard developers and provision fresh machines in one command
-- Use `mise bootstrap dotfiles …` (not the deprecated top-level `mise dotfiles`)
+- Use `mise dot …` for dotfiles and history (the top-level command is first-class again since 2026.9.8); `mise bootstrap dotfiles …` is equivalent
+- Prefer the **`packslip:`** backend when the publisher ships signed manifests — best provenance, plus version-matched completions, man pages, and agent skills
+- Prefer **`pypi:`** over `pipx:` in new configs (they are separate tool identities — don't switch an existing pin casually)
+- Use `lazy = true` for machine-wide tools you rarely invoke; declare `lazy_bins` for non-registry backends
+- Declare long-lived services in `[daemons]` and make tasks depend on them with `daemons = [...]` instead of hand-rolled "start background process, poll for readiness" prerequisite tasks
+- Use `port = "auto"` so the same stack runs in several git worktrees without hand-assigned ports
+- Encode non-version requirements (native libraries, reachable services) as `[doctor.checks]` so `mise doctor project` explains them with a `hint`
+- Replace the deprecated `output = "quiet"` mode with an explicit style plus `task.quiet = true`
+- Commit the `.mise/locks/` sidecar directory alongside a revision-2 `mise.lock`
+- Use `task_config.excludes` to keep stray executables out of file-task discovery
+- Put shared task flags in a `[task_templates]` `usage` and let extending tasks add their own — since 2026.9.11 the two **merge**, so stop copying flags into every task
+- Use `#MISE extends="<template>"` in file tasks to inherit tools/env/vars (the template's `run` is ignored there — the script is the command)
 
 ### DON'T ❌
 
@@ -3892,6 +4711,20 @@ Defaults are `HEAD~1` / `HEAD`; `MISE_AFFECTED_BASE` / `MISE_AFFECTED_HEAD` over
 - Use `[prepare.*]` — it no longer exists; use `[deps.*]`
 - Use `vars.mise` or `env.mise.*` — rejected / deprecated in favor of `vars._` and `env._`
 - Expect `bin_path` to support bare `{{os}}`/`{{arch}}` — use the `os()` / `arch()` functions
+- Expect a **subtask** reached via `run = [{ task = "…" }]` to start its own `daemons` — declare the requirement on the task you actually invoke
+- Assume switching `pipx:` → `pypi:` is a rename — it creates a **separate installation and lock entry**
+- Commit a revision-2 `mise.lock` before collaborators and CI are on mise 2026.9.7+ (older versions cannot read it)
+- Use `ghcr.io/jdx/mise:latest` as a base image — since 2026.9.12 it is a **scratch** image with no shell; use the `debian` tag or `COPY --from=`
+- Set `[daemons_settings]` in global or system config — it is ignored there with a warning
+- Put a `[doctor.checks]` secret or credential in command output — output is captured and discarded; explain via `description`/`hint` instead
+- Rely on `[bootstrap].config_roots` — deprecated 2026.9.4, removed 2027.3.3
+- Use `rust_cache` — it is a **deprecated no-op** that silently does nothing; use [mbx](https://mr-boxington.jdx.dev/getting-started)
+- Assume `minimum_release_age` being "unset" means no delay — a **built-in 24h cutoff** applies on most backends; use `"0s"` to truly disable
+- Declare the same flag in both a task template's `usage` and the extending task's — it gets listed **twice**
+- Expect `depends = []` on a task to cancel an inherited `depends` — it still inherits the template's
+- Assume `mise upgrade` frees disk immediately — replaced versions are kept for `upgrade.prune_after` (24h); use `--prune` to force
+- Rely on the old HTTP dedup/symlink layout — own-directory extraction is the default since 2026.9.6; set `shared_extraction = true` to opt back in
+- Use `mise bootstrap --from-git` — renamed to `--adopt`, **removed in 2026.10.0**
 
 ### Complete Task Example
 
