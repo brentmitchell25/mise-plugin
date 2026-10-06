@@ -1133,6 +1133,8 @@ depends = [{ task = "build", args = ["{{usage.app}}"] }]
 run = 'echo "deploying {{usage.app}}"'
 ```
 
+> Prefer this structured form for templated args. The string form `depends = ["build {{usage.app}}"]` runs fine, but `mise tasks validate` (2026.10.3) reports it as `missing-dependency` because it checks the unrendered name — a false failure if you validate in CI.
+
 Wildcards work too: `depends = ["lint:*"]`.
 
 **Optional dependencies (2026.7.17+):** `optional = true` runs all matches when present and is silently omitted when nothing matches. Invalid selectors still error. Works across `depends`, `depends_post`, and `wait_for`.

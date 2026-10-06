@@ -18,6 +18,7 @@
   - [Monorepo Affected-Task Selection](#10-monorepo-affected-task-selection)
   - [Project Services as Task Prerequisites](#11-project-services-as-task-prerequisites)
   - [Project Requirements Checks](#12-project-requirements-that-tool-versions-cant-express)
+  - [Sharing Config and Tasks Across Repos](#13-sharing-tools-env-and-tasks-across-repositories)
 - [Advanced Examples](#advanced-examples)
   - [Multi-Environment Terraform Deployment](#1-multi-environment-terraform-deployment-with-dynamic-completions)
   - [Dockerized Microservice Pipeline](#2-dockerized-microservice-build-pipeline-with-caching)
@@ -39,17 +40,18 @@ A Claude Code plugin that teaches Claude how to work with [mise](https://mise.jd
 When installed, Claude will:
 - Use the `usage` field for all task arguments (never shell-native `$1`/`$@` patterns)
 - Generate correct TOML-based and file-based tasks with proper configuration
-- Configure dev tools across 20 backends (packslip, aqua, github, npm, cargo, pypi, pkgx, etc.)
+- Configure dev tools across 20 backends (packslip, aqua, github, npm, cargo, pypi, spinel, etc.)
 - Set up environment variables, configuration environments, dotenv loading, and secrets
 - Create hooks and file watchers
-- Cache task outputs and replay logs instead of rebuilding (local and remote)
-- Declare long-lived project services in `[daemons]` and make tasks wait on them
+- Cache task outputs and replay logs instead of rebuilding (local and remote), and trace `mise run` over OpenTelemetry
+- Share tools, env, and hooks across repos with remote `include`, and tasks with OCI task catalogs
+- Declare long-lived project services in `[daemons]` and make tasks wait on them, or share one database server per machine with `[daemon_providers]`
 - Encode project requirements as `[doctor.checks]` for `mise doctor project`
 - Wire up monorepos — workspace project graphs and `mise run --affected` in CI
 - Sandbox risky tasks and read untrusted configs safely (`MISE_SAFE=1`)
 - Provision whole machines with `mise bootstrap`, locally or over SSH (system packages, users, files, services, firewall, Docker Compose, git repos, dotfiles, macOS defaults)
-- Track dotfiles in Git with `mise dot` — checkpoints, rollback, undo, and sharing
-- Follow mise best practices throughout — including avoiding the usage-spec attributes that are feature-gated out of mise and fail at runtime, and the fields that have quietly become no-ops
+- Manage dotfiles with `mise dot` — Stow-style dotfile groups, declarative removal, and Git-backed history with rollback and sharing
+- Follow mise best practices throughout — including the usage-spec traps verified against the live binary (TOML `usage` strings are Tera-rendered, completers mise shadows, attributes that still hard-error) and the fields that have quietly become no-ops
 
 This plugin is a pure skill — no commands, hooks, or MCP servers. It activates automatically whenever you work with mise.
 
@@ -58,55 +60,62 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 ### Tasks
 - **Strict `usage` field enforcement** — all arguments use mise's cross-platform usage spec
 - **TOML and file-based tasks** — inline tasks and executable scripts with `#MISE`/`#USAGE` headers
-- **Complete usage spec v6** — positional args, flags, choices, custom completions, variadic args, defaults, env binding, plus `group`/`flagset`/`output` nodes and relationship attributes (`required_if`, `conflicts`, `requires`, `exclusive`)
+- **Complete usage spec v6 (usage 6.12)** — positional args, flags, choices (literal, `env=`, and command-backed `run=`), `validate=` expressions, custom and delegated completions, `$usage_cmd` subcommand routing, variadic args, defaults, env binding, plus `group`/`flagset`/`output` nodes and relationship attributes (`required_if`, `conflicts`, `requires`, `exclusive`)
 - **Task dependencies** — `depends`, `depends_post`, `wait_for` with parallel execution and `optional` globs
 - **Freshness** — `sources`/`outputs` with `!` exclusions and brace globs, including `auto` mode
 - **Output caching** — `cache = { enabled = true }` restores artifacts and replays logs; `outputs = []` result-only caching; local and remote stores
 - **Task templates** — `[task_templates]` + `extends` with documented override/deep-merge rules, and `usage` flags that **merge** rather than replace
 - **Daemon prerequisites** — `daemons = [...]` starts and waits for project services before the task body runs
-- **Per-task output control** — `output` style field, `timeout`, structured `run`/`depends` with args/env
+- **Per-task output control** — `output` style field, `timeout`, `confirm` with custom answer labels, structured `run`/`depends` with args/env
+- **File tasks configured from TOML** — metadata-only `[tasks.<name>]` blocks add fields `#MISE` headers can't carry (`timeout`, `vars`, sandboxing)
+- **Shared task catalogs** — `task_config.includes` from local dirs, `git::` repos, or `oci::` artifacts
+- **OpenTelemetry tracing** — `otel.enabled`/`otel.logs` export `mise run` spans and task output (experimental)
 
 ### Dev Tools
-- **20 backends** — core, packslip, aqua, github, gitlab, forgejo, http, s3, pypi (formerly pipx), npm, go, cargo, gem, dotnet, conda, spm, pkgx, vfox, asdf, ubi (deprecated)
+- **20 backends** — core, packslip, aqua, github, gitlab, forgejo, http, s3, pypi (formerly pipx), npm, go, cargo, gem, dotnet, conda, spm, spinel (experimental), vfox, asdf, ubi (deprecated, removal 2027.1.0); `mise backends switch` for tools the registry moved
 - **Packslip** — signed publisher manifests with SSH-style signer pinning, plus version-matched shell completions, man pages, and agent skills
-- **Per-tool options** — version, OS restriction (including `unix`), postinstall commands, install env, `additional_asset_patterns`, table-form `rename_exe`
+- **Per-tool options** — version, OS restriction (including `unix`), `postinstall` (with `when = "always"`), install env, aqua `libc`, SLSA signer pinning, gem `source`, `additional_asset_patterns`, table-form `rename_exe`, and core rust/python/java/dotnet options
 - **Lazy tools** — `lazy = true` generates a bootstrap shim and defers install until first invocation
-- **Lockfiles** — `mise.lock` **revision 2** with npm/Python dependency graphs in sidecars, config-root-scoped `[tool_config] locked`, `mise lock --bump`/`--upgrade`, and the built-in 24h `minimum_release_age`
+- **Lockfiles** — `mise.lock` **revision 3** (forge repository IDs) with npm/Python dependency graphs in sidecars, config-root-scoped `[tool_config] locked`, `mise lock --bump`/`--upgrade`/`--sidecars`, tool-stub locking, and the built-in 24h `minimum_release_age`
 - **Shims and aliases** — shell integration, tool aliasing, version aliasing, `shims.exclude`, tool stubs
 
 ### Environments
 - **Environment variables** — basic, required, redacted (and `redact = false` opt-outs), lazy evaluation
-- **Special directives** — `_.path`, `_.file` (with `expand`), `_.source`, `_.python.venv`
-- **Configuration environments** — `MISE_ENV`, `.miserc.toml`, platform auto-envs
+- **Special directives** — `_.path`, `_.file` (with `expand` and the `mise-dotenv` parser), `_.source`, `_.python.venv`
+- **Configuration environments** — `MISE_ENV`, `.miserc.toml` / `.miserc.local.toml`, platform auto-envs
 - **Templates** — Tera v2 templating with functions, filters, tests, and a v1 → v2 migration table
 
 ### Services and Diagnostics
-- **Project daemons** — `[daemons]` with PostgreSQL/Redis/CockroachDB/NATS/SpiceDB presets, custom `run`/`task` daemons, `[daemon_groups]`, cross-project references, and `port = "auto"` for running one stack across git worktrees
+- **Project daemons** — `[daemons]` with PostgreSQL/Redis/CockroachDB/NATS/SpiceDB presets (Windows too, except Redis), custom `run`/`task` daemons, `[daemon_groups]`, cross-project references, `proxy_idle_timeout`, and `port = "auto"` plus stable `<NAME>_URL` hostnames for running one stack across git worktrees
+- **Shared server providers** — global `[daemon_providers]` run one PostgreSQL/CockroachDB/NATS server per machine and hand each checkout its own database or account
 - **Project diagnostics** — `[doctor.checks]` probes with `hint`, `timeout`, `dir`, `shell`, and `os` selectors for `mise doctor project`
 - **Command wrappers** — `[wrappers]` intercepts a command name before it reaches the active toolset
 
 ### Configuration
 - **Hooks** — cd, enter, leave, preinstall, postinstall triggers, with exact per-hook env vars and cross-config precedence
 - **File watchers** — watch patterns with automatic re-execution
-- **Settings** — ~324 configuration options across 36 namespaces, with types, defaults, and env var overrides
-- **Hierarchical config** — file precedence, merge behavior, configuration environments
-- **Monorepos** — workspace project graphs (Cargo/uv/Go/Node), `[monorepo.task_defaults]`, `^task` upstream deps, `mise run --affected`
-- **Deprecation calendar** — every dated removal and default flip in one table, including fields that are already silent no-ops
+- **Settings** — ~329 configuration options across 37 namespaces, with types, defaults, and env var overrides (including the ones whose env var names don't follow the `MISE_` rule)
+- **Hierarchical config** — file precedence, merge behavior, configuration environments, `conf.d` folder fragments
+- **Remote config includes** — top-level `include` pulls `[tools]`/`[env]`/`[hooks]` fragments from `git::` or `oci::` refs, with paranoid-mode SHA/digest pinning
+- **Monorepos** — workspace project graphs (Cargo/uv/Go/Node), `[monorepo.task_defaults]`, `[monorepo.path_aliases]`, `^task` upstream deps, `mise run --affected`
+- **Deprecation calendar** — every dated removal and default flip in one table, taken from the `deprecated_at!` dates in mise's source, including fields that are already silent no-ops
 
 ### Security
 - **Sandboxing** — `[settings.sandbox]` plus per-task `deny_*`/`allow_*` fields and matching CLI flags
 - **Safe mode** — `MISE_SAFE=1` turns mise into an inert config reader for untrusted repos and fork PRs
-- **Trust** — auto-trust rules, safe-config auto-load, git-worktree trust inheritance
-- **Supply chain** — cosign/SLSA/attestation/minisign verification, packslip signer pinning, and the built-in 24h `minimum_release_age`
+- **Trust** — auto-trust rules, safe-config auto-load (and the inline-tool-option exception), git-worktree trust inheritance
+- **Supply chain** — cosign/SLSA/attestation/minisign verification with pinned signer identities, packslip signer pinning, the built-in 24h `minimum_release_age`, and the 24h delay `mise self-update` and the installer now apply to mise itself
 
 ### Machine Setup
 - **`mise bootstrap`** — declarative end-to-end machine/developer setup across 17 ordered steps: Linux users/groups, vfox plugins, system packages (apt/dnf/pacman/apk/zypper/aur/brew/brew-cask/macos-app/mas/flatpak/nix/winget/scoop), privileged files, system services, firewall rules, Docker Compose projects, git repos, shell activation, macOS defaults, launchd/systemd services and timers, login shell, tools, and a `bootstrap` task
 - **Plan/apply workflow** — `mise bootstrap plan` with `--json` and `--detailed-exitcode`, plus per-resource `apply`/`status` subcommands that converge only on real drift
 - **Remote provisioning** — `mise bootstrap remote` applies the same project over SSH to a `[bootstrap.remote.hosts]` inventory or ad-hoc targets, detecting each host's OS/arch/libc and fetching a minisign-verified binary
-- **Declarative dotfiles** — `mise dot` / `mise bootstrap dotfiles` with symlink/symlink-each/copy/template modes, inline `content`, glob wildcards, `exclude` patterns, block/line edits, per-OS/profile `variants`, `encrypt`, and `unapply`
+- **Declarative dotfiles** — `mise dot` / `mise bootstrap dotfiles` with symlink/symlink-each/copy/template/`absent` modes, `permissions`, Stow-style `dot_prefix` and relative links, inline `content`, glob wildcards, `exclude` patterns, block/line edits, per-OS/profile `variants`, `encrypt`, and `unapply`
+- **Dotfile groups** — `[dotfile_groups]` Stow-package-style trees selected per machine, with orphan detection and `mise dot apply --prune`
+- **Modules** — config environments as removable bootstrap modules via `mise bootstrap unapply`
 - **Dotfiles history** — Git-backed checkpoints via `mise dot save`/`history`/`rollback`/`undo`, a background watcher service, and optional sharing through a setup repository
 - **Agent skills** — `mise skills ls`/`sync` links the version-matched `SKILL.md` bundles that `packslip:` tools publish into your agent's skills directory
-- **OCI images** — `mise oci build/push/run` with a built-in registry client and `[[oci.copy]]` layers, plus official `ghcr.io/jdx/mise` images
+- **OCI images** — `mise oci build/push/run` with a built-in registry client, `[[oci.copy]]` layers, and vfox plugin tools, plus official `ghcr.io/jdx/mise` images
 
 ## Installation
 
@@ -424,6 +433,29 @@ mise doctor project --json
 
 Checks run concurrently, a failure never stops the others, and command output is captured and **discarded** — so a probe can't accidentally print a credential into the report. Explain the requirement with `description` and the remedy with `hint`. Ordinary `mise doctor` still diagnoses mise itself and never runs these.
 
+### 13. Sharing tools, env, and tasks across repositories
+
+Ask Claude: *"Every service repo should get our standard tool versions, env, and shared tasks from one place."*
+
+```toml
+# Each service's mise.toml
+include = [
+  # [tools]/[env]/[vars]/[hooks]/[wrappers] fragment — pinned to a commit
+  "git::https://github.com/myorg/platform.git//mise/base.toml?ref=4f2c9e1d8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d",
+]
+
+[task_config]
+includes = [
+  "mise-tasks",                                         # keep the local default dir
+  "oci::ghcr.io/myorg/shared-tasks@sha256:0f1e2d3c...", # task catalog published with `oras push`
+]
+
+[tools]
+node = "24"   # this file's own entries override the included ones
+```
+
+An `include` fragment ranks just below the file that includes it and may carry tools, env, vars, hooks, aliases, plugins, and wrappers — but **not tasks or settings**, which is why shared tasks come through `task_config.includes`. Includes inherit the including file's trust, are cached under `$MISE_CACHE_DIR/config-includes`, and under paranoid mode must be pinned by full commit SHA or OCI digest. OCI task catalogs are digest-verified but not signature-checked, so pin `@sha256:` for anything you don't control.
+
 ## Advanced Examples
 
 These examples demonstrate what Claude generates with the plugin installed — showcasing dynamic completions, safety confirmations, dependency chains, caching, file-based tasks, and real-world tooling integration.
@@ -436,12 +468,14 @@ These examples demonstrate what Claude generates with the plugin installed — s
 [tasks."infra:plan"]
 description = "Terraform plan for a service environment"
 usage = '''
-arg "<service>" help="Service to deploy"
-complete "service" run="ls -d infrastructure/*/application 2>/dev/null | sed 's|infrastructure/||;s|/application||'"
-arg "<environment>" help="Target environment"
-complete "environment" run="ls infrastructure/${usage_service}/application/env/ 2>/dev/null | sed 's/.tfvars//'"
+arg "<service>" help="Service to deploy" {
+  complete run="ls -d infrastructure/*/application 2>/dev/null | sed 's|infrastructure/||;s|/application||'"
+}
+arg "<environment>" help="Target environment" {
+  complete run="ls infrastructure/{% raw %}{{ words[PREV] | shell_quote }}{% endraw %}/application/env/ 2>/dev/null | sed 's/.tfvars//'"
+}
 flag "--destroy" help="Plan a destroy operation"
-flag "-l --lock" default="true" negate="--no-lock" help="Lock state during plan"
+flag "-l --lock" default=#true negate="--no-lock" help="Lock state during plan"
 '''
 env = { TF_IN_AUTOMATION = "1" }
 run = '''
@@ -460,10 +494,12 @@ terraform plan \
 [tasks."infra:apply"]
 description = "Apply a Terraform plan"
 usage = '''
-arg "<service>" help="Service to deploy"
-complete "service" run="ls -d infrastructure/*/application 2>/dev/null | sed 's|infrastructure/||;s|/application||'"
-arg "<environment>" help="Target environment"
-complete "environment" run="ls infrastructure/${usage_service}/application/env/ 2>/dev/null | sed 's/.tfvars//'"
+arg "<service>" help="Service to deploy" {
+  complete run="ls -d infrastructure/*/application 2>/dev/null | sed 's|infrastructure/||;s|/application||'"
+}
+arg "<environment>" help="Target environment" {
+  complete run="ls infrastructure/{% raw %}{{ words[PREV] | shell_quote }}{% endraw %}/application/env/ 2>/dev/null | sed 's/.tfvars//'"
+}
 '''
 confirm = "Apply Terraform plan for {{usage.service}} in {{usage.environment}}?"
 run = '''
@@ -475,12 +511,14 @@ terraform apply "${usage_environment?}.tfplan"
 
 [tasks."infra:destroy"]
 description = "Destroy infrastructure for a service environment"
-depends = ["infra:plan {{usage.service}} {{usage.environment}} --destroy"]
+depends = [{ task = "infra:plan", args = ["{{usage.service}}", "{{usage.environment}}", "--destroy"] }]
 usage = '''
-arg "<service>" help="Service to destroy"
-complete "service" run="ls -d infrastructure/*/application 2>/dev/null | sed 's|infrastructure/||;s|/application||'"
-arg "<environment>" help="Target environment"
-complete "environment" run="ls infrastructure/${usage_service}/application/env/ 2>/dev/null | sed 's/.tfvars//'"
+arg "<service>" help="Service to destroy" {
+  complete run="ls -d infrastructure/*/application 2>/dev/null | sed 's|infrastructure/||;s|/application||'"
+}
+arg "<environment>" help="Target environment" {
+  complete run="ls infrastructure/{% raw %}{{ words[PREV] | shell_quote }}{% endraw %}/application/env/ 2>/dev/null | sed 's/.tfvars//'"
+}
 '''
 confirm = "DESTROY all infrastructure for {{usage.service}} in {{usage.environment}}? This cannot be undone."
 run = '''
@@ -490,6 +528,8 @@ cd "infrastructure/${usage_service?}/application"
 terraform apply "${usage_environment?}.tfplan"
 '''
 ```
+
+The environment completer reads the service from `{{ words[PREV] }}` because `usage_*` variables aren't set while completing. It's wrapped in `{% raw %}` because mise Tera-renders TOML `usage` strings before usage sees them. A bare `{{ words[PREV] }}` stops the task from loading and breaks tab-completion for every task in the project.
 
 ### 2. Dockerized microservice build pipeline with caching
 
@@ -561,12 +601,15 @@ description = "Full CI pipeline: lint, build all, test all, publish"
 depends = ["lint"]
 usage = '''
 flag "--publish" help="Also publish images after tests pass"
-flag "--services <list>" var=#true default="api gateway worker" help="Services to build"
+flag "--services <list>" var=#true help="Services to build" {
+  default { "api"; "gateway"; "worker" }
+}
 '''
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
-for svc in $usage_services; do
+eval "services=($usage_services)"   # variadic values arrive shell-escaped
+for svc in "${services[@]}"; do
   echo "=== Building $svc ==="
   mise run docker:build "$svc"
   mise run docker:test "$svc"
@@ -765,20 +808,21 @@ The skill provides Claude with comprehensive knowledge of:
 
 | Area | Details |
 |------|---------|
-| **Tasks** | All fields (run, depends, sources, outputs, cache, usage, extends, timeout, output, pass_through_env, sandbox, etc.), structured run/depends, `[task_templates]`, file tasks, remote tasks |
-| **Usage Spec** | Full arg/flag/cmd/complete reference with all attributes, `effect=`, env var access patterns, bash expansion — plus the attributes that are documented upstream but hard-error |
+| **Tasks** | All fields (run, depends, sources, outputs, cache, usage, extends, timeout, output, confirm, pass_through_env, sandbox, etc.), which fields `#MISE` headers accept, TOML metadata overlays for file tasks, structured run/depends, `[task_templates]`, remote `git::`/`oci::` task catalogs |
+| **Usage Spec** | Full arg/flag/cmd/complete reference for usage 6.12 — `choices run=`/`env=`, `validate=`, nested and delegated `complete`, `$usage_cmd`, `effect=`, env var access patterns — plus Tera rendering of TOML specs, completers mise shadows, and the attributes that still hard-error |
+| **Tracing** | `otel.enabled`/`otel.logs`, OTLP env vars, span attributes, `TRACEPARENT` propagation, TTY side effects |
 | **Task Caching** | `cache = {}`, result-only `outputs = []`, `input_groups`/`@group:` refs, `global_inputs`, `command_inputs`, `--task-cache` modes, `mise cache task`, remote cache settings |
-| **Dev Tools** | 20 backends, per-tool options, `lazy`/`lazy_bins`, `version_order`, version formats, backend-specific config (packslip, github, http, s3, cargo, pypi, npm, pkgx, etc.), tool stubs, lockfile revision 2, provenance |
-| **Daemons** | `[daemons]`, `[daemon_groups]`, `[daemons_settings]`, five service presets, custom `run`/`task` daemons, cross-project references, worktree-aware `port = "auto"`, task `daemons` prerequisites |
+| **Dev Tools** | 20 backends, per-tool options, `lazy`/`lazy_bins`, `version_order`, version formats, backend-specific config (packslip, aqua, github, http, s3, cargo, pypi, npm, gem, spinel, etc.), `mise backends switch`, tool stubs, lockfile revision 3, provenance and signer pinning |
+| **Daemons** | `[daemons]`, `[daemon_groups]`, `[daemons_settings]`, `[daemon_providers]`, five service presets, custom `run`/`task` daemons, cross-project references, worktree-aware `port = "auto"` and `<NAME>_URL`, `proxy_idle_timeout`, task `daemons` prerequisites |
 | **Diagnostics** | `[doctor.checks]` fields, concurrency and output limits, `mise doctor project --json` |
-| **Environments** | env vars, `_.path`/`_.file`/`_.source`/`_.python.venv` directives, configuration environments, `.miserc.toml`, required/redacted vars, secrets (fnox/sops/age), Tera v2 templates |
+| **Environments** | env vars, `_.path`/`_.file`/`_.source`/`_.python.venv` directives, `mise-dotenv` parsing, configuration environments, `.miserc.toml`/`.miserc.local.toml`, required/redacted vars, secrets (fnox/sops/age) and secret hygiene, Tera v2 templates |
 | **Hooks** | cd/enter/leave/preinstall/postinstall hooks, exact per-hook env vars, cross-config precedence, file watchers |
 | **Wrappers** | `[wrappers]` command interception and `activate_shims` |
 | **Security** | `[settings.sandbox]`, per-task deny/allow fields, `MISE_SAFE=1`, paranoid mode, trust rules, supply-chain verification |
-| **Machine Bootstrap** | `mise bootstrap` (17 steps: accounts, plugins, packages, files, services, firewall, compose, repos, shell activation, macOS defaults, services/timers, login shell), 14 package managers, `mise dot` dotfiles + Git-backed history, agent skills, OCI images |
+| **Machine Bootstrap** | `mise bootstrap` (17 steps: accounts, plugins, packages, files, services, firewall, compose, repos, shell activation, macOS defaults, services/timers, login shell), 14 package managers, modules and `bootstrap unapply`, `mise dot` dotfiles + dotfile groups + Git-backed history, agent skills, OCI images |
 | **Dependencies** | `[deps]` providers (npm, uv, poetry, go, bundler, …) and `mise deps` |
-| **Monorepos** | `monorepo_root`, `[monorepo].config_roots`, `//path:task` syntax, workspace project graph (Cargo/uv/Go/Node), `[monorepo.task_defaults]`, `^task` upstream deps, `mise run --affected`, root lockfiles |
-| **Configuration** | File hierarchy, ~324 settings across 36 namespaces, `conf.d` fragments, merge behavior, minimum version, deprecation calendar |
+| **Monorepos** | `monorepo_root`, `[monorepo].config_roots`, `[monorepo.path_aliases]`, `//path:task` syntax, workspace project graph (Cargo/uv/Go/Node), `[monorepo.task_defaults]`, `^task` upstream deps, `mise run --affected`, root lockfiles |
+| **Configuration** | File hierarchy, ~329 settings across 37 namespaces, `conf.d` file and folder fragments, remote `include`, merge behavior, minimum version, CI (`jdx/mise-action@v5`) and IDE setup, deprecation calendar |
 | **Best Practices** | DO/DON'T patterns, complete examples, common gotchas |
 
 ## Requirements
