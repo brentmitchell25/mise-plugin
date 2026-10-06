@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "mise",
-      "description": "Use when working with mise - creating/editing mise.toml or .mise.toml files, defining tasks with usage field arguments, managing dev tools and environments, configuring hooks, task caching, sandboxing, project daemons, project diagnostics, command wrappers, machine bootstrap, dotfiles history, agent skills, monorepo workspaces, or when user mentions mise configuration.",
+      "description": "Use when working with mise - creating/editing mise.toml or .mise.toml files, defining tasks with usage field arguments, managing dev tools and environments, configuring hooks, task caching, OpenTelemetry task tracing, sandboxing, project daemons, project diagnostics, command wrappers, shared remote config includes, machine bootstrap, dotfiles and dotfile groups, dotfiles history, agent skills, monorepo workspaces, or when user mentions mise configuration.",
       "source": "./",
       "category": "development",
       "keywords": [
@@ -26,7 +26,7 @@
         "bootstrap",
         "dotfiles"
       ],
-      "version": "2.10.0"
+      "version": "2.11.0"
     }
   ]
 }

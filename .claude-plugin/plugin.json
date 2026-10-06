@@ -1,6 +1,6 @@
 {
   "name": "mise",
-  "version": "2.10.0",
+  "version": "2.11.0",
   "description": "Comprehensive mise skill for Claude Code covering the full mise ecosystem: task definition with usage spec v6 arguments, task output caching, dev tool management across 20 backends including packslip and pypi, environment configuration, hooks, project daemons, project diagnostics, command wrappers, monorepo workspaces, sandboxing, machine bootstrap with remote SSH provisioning, dotfiles history, agent skills, and 324 settings.",
   "author": {
     "name": "Brent Mitchell"
