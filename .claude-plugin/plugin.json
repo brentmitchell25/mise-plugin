@@ -1,7 +1,7 @@
 {
   "name": "mise",
-  "version": "2.11.0",
-  "description": "Comprehensive mise skill for Claude Code covering the full mise ecosystem: task definition with usage spec v6 arguments, task output caching, OpenTelemetry task tracing, dev tool management across 20 backends including packslip and pypi, environment configuration, shared remote config includes, hooks, project daemons with shared server providers, project diagnostics, command wrappers, monorepo workspaces, sandboxing, machine bootstrap with remote SSH provisioning, dotfiles and dotfile groups, dotfiles history, agent skills, and 329 settings.",
+  "version": "2.12.0",
+  "description": "Comprehensive mise skill for Claude Code covering the full mise ecosystem: task definition with usage spec arguments, task skip_if and task-scoped fnox secrets, task output caching, OpenTelemetry task tracing, dev tool management across 20 backends including packslip and pypi, automatic tool updates, environment configuration with per-machine vars prompts, shared config includes and the global override file, hooks, project daemons with shared server providers, project diagnostics, command wrappers, the mise lsp language server, monorepo workspaces, sandboxing, machine bootstrap with remote SSH provisioning, dotfiles and dotfile groups, dotfiles history, agent skills, and 351 settings.",
   "author": {
     "name": "Brent Mitchell"
   },
