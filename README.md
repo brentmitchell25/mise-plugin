@@ -94,7 +94,7 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 ### Configuration
 - **Hooks** — cd, enter, leave, preinstall, postinstall triggers, with exact per-hook env vars and cross-config precedence
 - **File watchers** — watch patterns with automatic re-execution
-- **Settings** — ~329 configuration options across 37 namespaces, with types, defaults, and env var overrides (including the ones whose env var names don't follow the `MISE_` rule)
+- **Settings** — ~351 configuration options across 40 namespaces, with types, defaults, and env var overrides (including the ones whose env var names don't follow the `MISE_` rule)
 - **Hierarchical config** — file precedence, merge behavior, configuration environments, `conf.d` folder fragments
 - **Remote config includes** — top-level `include` pulls `[tools]`/`[env]`/`[hooks]` fragments from `git::` or `oci::` refs, with paranoid-mode SHA/digest pinning
 - **Monorepos** — workspace project graphs (Cargo/uv/Go/Node), `[monorepo.task_defaults]`, `[monorepo.path_aliases]`, `^task` upstream deps, `mise run --affected`
@@ -822,7 +822,7 @@ The skill provides Claude with comprehensive knowledge of:
 | **Machine Bootstrap** | `mise bootstrap` (17 steps: accounts, plugins, packages, files, services, firewall, compose, repos, shell activation, macOS defaults, services/timers, login shell), 14 package managers, modules and `bootstrap unapply`, `mise dot` dotfiles + dotfile groups + Git-backed history, agent skills, OCI images |
 | **Dependencies** | `[deps]` providers (npm, uv, poetry, go, bundler, …) and `mise deps` |
 | **Monorepos** | `monorepo_root`, `[monorepo].config_roots`, `[monorepo.path_aliases]`, `//path:task` syntax, workspace project graph (Cargo/uv/Go/Node), `[monorepo.task_defaults]`, `^task` upstream deps, `mise run --affected`, root lockfiles |
-| **Configuration** | File hierarchy, ~329 settings across 37 namespaces, `conf.d` file and folder fragments, remote `include`, merge behavior, minimum version, CI (`jdx/mise-action@v5`) and IDE setup, deprecation calendar |
+| **Configuration** | File hierarchy, ~351 settings across 40 namespaces, `conf.d` file and folder fragments, remote `include`, merge behavior, minimum version, CI (`jdx/mise-action@v5`) and IDE setup, deprecation calendar |
 | **Best Practices** | DO/DON'T patterns, complete examples, common gotchas |
 
 ## Requirements
