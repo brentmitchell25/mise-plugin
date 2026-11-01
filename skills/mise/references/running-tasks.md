@@ -20,7 +20,7 @@
 | `mise run` (no args) | Runs the `default` task; with no `default`, opens the interactive task selector (TTY only) |
 | `mise tasks` / `mise tasks ls` / `mise tasks list` | List all tasks (`-J/--json`, `-x/--extended`, `--no-header`); `list` alias since 2026.10.18. `mise tasks run` still works but is hidden from help (2026.10.5) |
 | `mise tasks --hidden` | Include hidden tasks |
-| `mise tasks --global` / `--local` | Filter by config scope |
+| `mise tasks --global` / `--no-global` | Filter by config scope (`--no-global` 2026.10.22; `-l/--local` is a deprecated alias — warns from 2027.1.0, removed 2027.7.0) |
 | `mise tasks -a` / `--all` | Entire monorepo, including siblings (`-a` since 2026.10.15) |
 | `mise tasks --name-only` | One name per line (fzf-friendly) |
 | `mise tasks --sort <name\|alias\|description\|source>` | Sort order (`--sort-order asc\|desc`) |
@@ -29,10 +29,12 @@
 | `mise tasks deps --dot` | DOT format for Graphviz |
 | `mise tasks graph [--explain] [--json]` | Inspect the workspace project graph (Cargo/uv/Go/Gradle/Node) — **not experimental since 2026.10.6**; needs `monorepo_root = true` |
 | `mise tasks info <task> [-J]` | Show task details (JSON output includes `config_sources`) |
-| `mise tasks add <name> -- <cmd>` | Create task via CLI: `-a/--alias`, `-d/--depends`, `--depends-post`, `-w/--wait-for`, `-D/--dir`, `-f/--file` (file task), `-H/--hide`, `-q/--quiet`, `--silent`, `-r/--raw`, `-s/--sources`, `--outputs`, `--description`, `--run-windows` (ignored with `--file`), `--shell`. Marks the written config as trusted |
+| `mise tasks add <name> -- <cmd>` | Create task via CLI: `-a/--alias`, `-d/--depends`, `--depends-post`, `-w/--wait-for`, `-D/--dir`, `-f/--file` (file task), `-H/--hide`, `-q/--quiet`, `--silent`, `-r/--raw`, `-s/--sources`, `--outputs`, `--description`, `--run-windows` (ignored with `--file`), `--shell`; since **2026.10.25** also `--env-var KEY=VALUE` and `--tools TOOL@VER` (repeatable; no version ⇒ `latest`), `--usage <SPEC>` (with `--file`, written as one `#USAGE` line per spec line), `--confirm <MSG>`, `-F/--force`, `-n/--dry-run`, `-J/--json`, and target flags `-e/--env <ENV>` (`--env local` → `mise.local.toml`; `-e ci` writes `mise.ci.toml`, loaded only with `MISE_ENV=ci`), `-g/--global`, `-p/--path` (`--file` can't combine with them). Args after `--` are shell-quoted into one `run` string, so pass the command as separate words — `-- 'echo hi'` is stored as the single quoted word `'echo hi'` and fails with `command not found`. Re-adding an identical task is a no-op; replacing a **different** task without `--force` is deprecated (warns from 2027.5.0, refused from 2028.5.0). Trusts the written file's config root (not in safe mode) |
+| `mise tasks set <task> [flags] [-- <cmd>]` | **2026.10.25.** Change only the given fields of a TOML task, keeping the rest of the file (comments too). Takes the `tasks add` field flags; list flags (`--depends`, `--sources`, …) replace the whole list; `--env-var`/`--tools` add or replace single entries; `-u/--unset <FIELD>` (repeatable) removes a field; a command after `--` replaces `run`. Without `-e`/`-g`/`-p` it edits the one loaded file that defines the task and fails when several do. File tasks are refused (use `mise tasks edit`). `-n/--dry-run`, `-J/--json` |
+| `mise tasks rm <task>…` / `mise tasks remove` | **2026.10.25.** Remove a TOML task's table or delete a file task's script. Asks first — pass `--yes` without a terminal (a piped `y` isn't accepted). Same `-e`/`-g`/`-p`, `-n`, `-J` flags (`--json` prints an array). Refuses tasks from `task_config.includes` files or package.json; dependents are left as is (`mise tasks validate` reports them). A task named `set`, `rm`, or `remove` is now reachable only through `mise run <name>` |
 | `mise tasks edit <task> [-p]` | Edit/create task in `$EDITOR` (respects configured `includes`; `-p` prints the path) |
 | `mise tasks validate [--errors-only] [--json]` | Validate task definitions. Since **2026.9.15** an unparseable `usage` spec is an **error** (`usage-parse-error`, exit 1) — CI that ran it may start failing. Since 2026.10.4 it also errors on `secrets` with no `[secrets.fnox]`, secrets conflicting with the sandbox or `[env]`, and unknown `daemons` |
-| `mise watch <task>` / `mise w <task>` | Watch and re-run on file changes (requires watchexec) |
+| `mise watch <task>` / `mise w <task>` | Watch and re-run on file changes (requires watchexec); `--once` waits for one change, runs once, and exits with the tasks' status (2026.10.25) |
 | `mise run a ::: b ::: c` | Run multiple tasks in parallel (with separate args) |
 
 ### Execution Flags
@@ -128,6 +130,8 @@ Wrapper around `watchexec` (install separately: `mise use -g watchexec@latest`).
 | `--stop-timeout <DUR>` | — | Grace period before kill (default `10s`) |
 | `--debounce <DUR>` | `-d` | Debounce window (default `50ms`) |
 | `--postpone` | `-p` | Wait for first change before initial run |
+| `--once` | — | **2026.10.25.** Wait for a change in the watched sources, run the tasks once through `mise run`, and exit with their status (implies `--postpone`; exit 1 if watchexec stops before a change, 130 on Ctrl-C). Refused with watchexec run-control flags (`--restart`, `--clear`, `--on-busy-update`, `--signal`, `--stop-signal`, `--stop-timeout`, `--delay-run`, `--shell`, `--notify`, `--bell`, `--timings`, `--wrap-process`, …). Use it in scripts and agents instead of a sleep/poll loop: `mise watch test --once` |
+| `--exit-on-error` | — | **2026.10.25.** Stop watching at the first failed run and exit with its status (needs watchexec ≥ 2.5.0; no effect with `--once`) |
 | `--delay-run <DUR>` | — | Sleep before each execution |
 | `--notify` | `-N` | Desktop notifications |
 | `--bell` | — | Terminal bell on completion |

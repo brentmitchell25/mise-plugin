@@ -43,7 +43,7 @@ mise run build --deny-net --allow-read /src
 mise x --deny-all --allow-read=. --allow-write=./dist -- npm install
 ```
 
-**Implicit access:** system paths stay readable (Linux `/usr /lib /bin /etc /dev /proc /sys /tmp /nix`; macOS `/System /Library /usr /bin /dev /etc /private /opt/homebrew /nix`) along with mise tool dirs. `/tmp` and `/dev` stay writable. `--allow-write` paths are implicitly readable. `--deny-env` still passes `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `LANG`; `--allow-env <VAR>` implies deny for everything else and supports wildcards.
+**Implicit access:** system paths stay readable (Linux `/usr /lib /lib64 /bin /sbin /etc /dev /proc /sys /tmp /nix /snap /home/linuxbrew` plus the file `/etc/resolv.conf` points to; macOS `/System /Library /usr /bin /sbin /dev /etc /var/run /tmp /private/tmp /private/etc /private/var/run /opt/homebrew /nix` — **not** the rest of `/private`, since 2026.10.19) along with mise tool dirs. `/tmp` (and `/private/tmp`) and `/dev` stay writable. `--allow-write` paths are implicitly readable. `--deny-env` still passes `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `COLORTERM`, `LANG` (Windows adds `SystemRoot`, `SystemDrive`, `windir`, `ComSpec`, `PATHEXT`, `TEMP`, `TMP`, `USERPROFILE`, `USERNAME`), plus a task's `pass_through_env` and cache `env` vars; `--allow-env <VAR>` implies deny for everything else and supports wildcards.
 
 **Platform matrix:**
 
@@ -64,7 +64,7 @@ If Landlock is unavailable or cannot apply filesystem restrictions, the command 
 MISE_SAFE=1 mise lock --bump --dry-run --json
 ```
 
-| Safe mode… | What (as of 2026.10.19) |
+| Safe mode… | What (as of 2026.10.25) |
 |------------|-------------------------|
 | **Refuses (errors)** | Template `exec()`, `read_file()`, `read_json/yaml/toml()`, `get_env()`; filters `hash_file`, `file_size`, `last_modified`, `canonicalize`; tests `dir`/`file`/`exists`; **running tasks**; tool options `postinstall`, `install_env`, spm `install_command`; asdf plugin scripts (incl. `exec-env`) and plugin installs; **all S3 requests**; `mise secrets`/`--secrets`; `mise daemons`; `[doctor.checks]` |
 | **Ignores (skips silently)** | Hooks and `[[watch_files]]` everywhere (incl. bootstrap hooks); `_.source` everywhere; project `[env]`, `[vars]`, and env directives; project `[settings]`; project `path:` versions; project `[shell_alias]`, `[wrappers]`, rust `mr_boxington`, and **lazy** tools; project `[tool_alias]` entries targeting global tools; remote includes and remote task files; `[deps]`; daemon declarations; project `[bootstrap]`, `[dotfiles]`, `[dotfile_groups]` |

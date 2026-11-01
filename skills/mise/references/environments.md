@@ -68,15 +68,18 @@ The reserved key `_` is a TOML table for configuration, since nested env vars ma
 
 > **Deprecation:** the older `env.mise.*` spelling is deprecated (removal **2026.12.0**) — use `env._.*`. Likewise, the `value`/`values` keys inside `_.file`/`_.path`/`_.source` objects are deprecated in favor of `path` (a string *or* an array); removal **2026.12.0**.
 
-#### `_.path` — Prepend to PATH
+#### `_.path` — Add to PATH
 
-Options: `path` (string or array) / `paths` (array), `tools`. **No `redact`/`expand`.**
+Options: `path` (string or array) / `paths` (array), `tools`, `position` (`"prepend"` default \| `"append"`, 2026.10.24). **No `redact`/`expand`** (accepted but ignored).
 
 ```toml
 [env]
 _.path = ["tools/bin", "{{config_root}}/scripts"]
 _.path = { path = ["{{env.GEM_HOME}}/bin"], tools = true }  # Lazy eval after tools
+_.path = { path = ["~/bin", "~/.cargo/bin"], position = "append" }  # after tool paths
 ```
+
+`position = "append"` puts entries **after the paths of mise-managed tools and before the inherited `PATH`**, so a personal `~/bin` can't shadow a mise tool; it orders only the paths mise adds (`tools = true` doesn't change it). Any other value is a parse error; `position` on `_.file`/`_.source` is accepted and ignored.
 
 Relative paths resolve against `{{config_root}}`; `~` paths are accepted.
 
@@ -227,7 +230,7 @@ Only **seven** settings are `.miserc`-settable:
 | `override_tool_versions_filenames` | `MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES` | `[]` |
 | `env_conf_d` | `MISE_ENV_CONF_D` | unset — opt into environment-specific dotted `conf.d` filenames now (see [File Hierarchy](settings.md#file-hierarchy)) |
 
-Its Tera context is limited. **Global/system miserc:** `env.*`, `config_root`, `cwd`, `xdg_*`, `mise_config_dir`, `system_brew_prefix`, all filters/tests, and all functions **except** `exec()`, `read_file()`, `read_json/yaml/toml()`; `vars`, `tools`, `mise_env`, `mise_bin`, and `mise_pid` are unavailable. 🔒 **Project `.miserc.toml` (2026.10.19 security):** `env` is empty and `get_env()` unavailable; only `if`/`elif`/`else`/`endif` statements; only the functions `arch`, `os`, `os_family`, `libc`, `avx2`, `num_cpus`, and a short filter/test whitelist; max **16 KiB**. A render failure (or a limit violation) silently falls back to the raw content. Your own `~/.miserc.toml` can't ignore the global config. `.miserc.toml` never needs trust.
+Its Tera context is limited. **Global/system miserc:** `env.*`, `config_root`, `cwd`, `xdg_*`, `mise_config_dir`, `system_brew_prefix`, all filters/tests, and all functions **except** `exec()`, `read_file()`, `read_json/yaml/toml()`; `vars`, `tools`, `mise_env`, `mise_bin`, and `mise_pid` are unavailable. 🔒 **Project `.miserc.toml` (2026.10.19 security):** `env` is empty and `get_env()` unavailable; only `if`/`elif`/`else`/`endif` statements; only the functions `arch`, `os`, `os_family`, `libc`, `avx2`, `num_cpus`, and a short filter/test whitelist; max **16 KiB**. A project file that breaks these limits (or fails to parse) is left unrendered **with a warning** (`not rendering the templates of the .miserc.toml in <dir>: …`); other render failures, such as an undefined variable, silently fall back to the raw content. Your own `~/.miserc.toml` can't ignore the global config. `.miserc.toml` never needs trust.
 
 **Platform auto-envs** (`auto_env` setting): `unix` (**not defined on Windows**); `linux`/`macos`/`windows`; `linux-x64`/`macos-arm64`/`windows-x64`. Files like `mise.windows.toml` and `mise.macos-arm64.toml` load automatically with matching lockfiles (`mise.windows.lock`). Precedence: `unix` < `{os}` < `{os}-{arch}` < explicit `MISE_ENV` entries. Affects **config discovery and lockfile selection only** — platform envs are not added to `{{ mise_env }}` or the `MISE_ENV` passed to tasks. **Disabled by default today; warns from 2026.12.0 when a platform file would newly load; defaults to enabled in 2027.6.0.** Setting it in `mise.toml` does nothing (early-init).
 
@@ -257,7 +260,7 @@ Redaction requires a non-`raw` output mode — tasks with `raw = true` bypass in
 
 mise documents three approaches:
 
-1. **fnox (recommended)** — a separate [@jdx](https://github.com/jdx) project: a full secret manager with remote storage (1Password, AWS Secrets Manager) and remote encryption (AWS KMS). Two ways in: the native **`[secrets.fnox]` + per-task `secrets`** integration (**experimental**, 2026.10.4 — see [Task-Scoped Secrets](task-configuration.md#task-scoped-secrets-experimental)), or wrapping commands with `fnox exec -- mise ...`. The `mise-env-fnox` plugin / `_.fnox-env` directive are deprecated.
+1. **fnox (recommended)** — a separate [@jdx](https://github.com/jdx) project: a full secret manager with remote storage (1Password, AWS Secrets Manager) and remote encryption (AWS KMS). Two ways in: the native **`[secrets.fnox]` + per-task `secrets`** integration (**experimental**, 2026.10.4 — see [Task-Scoped Secrets](task-configuration.md#task-scoped-secrets-experimental)), or wrapping commands with `fnox exec -- mise ...`. The `mise-env-fnox` plugin / `_.fnox-env` directive are deprecated. Project grants can't use keys from your **personal** fnox config (2026.10.23, see the task-scoped secrets restrictions).
 2. **SOPS (experimental)** — encrypt entire files, load via `env._.file`.
 3. **Direct age (experimental)** — encrypt individual env vars inline in `mise.toml`.
 
@@ -279,11 +282,11 @@ _.file = { path = ".env.json", redact = true }   # with redaction
 
 **Settings:** `sops.age_key`, `sops.age_key_file` (unset by default — `~/.config/mise/age.txt` is only the last step of the lookup chain), `sops.rops` (default `true`, native Rust impl), `sops.strict` (default `true`). `sops.age_recipients` is a **deprecated no-op** (warns 2026.10.5, removed 2027.10.5) — encrypt with `mise set --age-encrypt --age-recipient <r> KEY=value` instead.
 
-> The external `sops` CLI has no TOML support. mise decrypts SOPS `.env.toml` only with the default `sops.rops = true` (the built-in engine, which supports **age only**). With `sops.rops = false` mise shells out to the `sops` CLI, which supports AWS KMS, GCP KMS, Azure Key Vault, Vault, and PGP — but encrypted TOML then fails.
+> The external `sops` CLI has no TOML support. mise decrypts SOPS `.env.toml` only with the default `sops.rops = true` (the built-in engine, which supports **age only**). With `sops.rops = false` mise shells out to the `sops` CLI, which supports AWS KMS, GCP KMS, Azure Key Vault, Vault, and PGP — but encrypted TOML then fails. mise finds that CLI in the project's tools, then `PATH`, skipping mise shim and command-wrapper dirs (2026.10.20), so a shim alone doesn't count (`sops command not found` under `sops.strict`).
 
 **Secret hygiene (2026.10.3, security):**
 - `__MISE_DIFF` / `__MISE_SESSION` — inherited by every child of an activated shell, task, and `mise x` — now store a `blake3:<hex>` **digest** per managed value instead of plaintext (the value itself is still in the child's env; low-entropy values are brute-forceable).
-- **Secret-bearing environments are never written to the env cache:** any config with an `age` value, a sops-encrypted `_.file`, any directive with `redact = true`, or a plugin returning `redact = true`/`cacheable = false`. Settings-level `redactions` patterns alone do **not** mark the env uncacheable.
+- **Secret-bearing environments are not written to the env cache:** never for an `age` value, a sops-encrypted `_.file`, a plugin returning `cacheable = false`, redacted `[vars]`, or redacted `default`/`required` directives. Directives with `redact = true` (and plugins returning `redact = true`) are skipped unless `env_cache_redacted = true` (2026.10.25), which caches them encrypted with the key `mise activate` puts in the shell env; values stay masked on a cache hit. Settings-level `redactions` patterns alone do **not** mark the env uncacheable. `MISE_DEBUG=1` logs why an env wasn't cached.
 - `_.my-plugin = { redact = false }` now **overrides** the plugin's redact preference (and isn't passed to the plugin); a non-boolean `redact` is a config error.
 - `mise x -- fish` no longer passes env values in fish's argv (visible in `ps`).
 
@@ -358,7 +361,7 @@ PROJECT_NAME = "{{ cwd | basename }}"
 | `num_cpus()` | CPU count |
 | `now([timezone])` | Current datetime — **Tera v2 signature**; defaults to UTC, accepts IANA names |
 | `choice(n, alphabet)` | Random n-char string |
-| `haiku([words], [separator], [digits])` | Random readable name — defaults `words=2`, `separator="-"`, `digits=2` ⇒ `fragrant-hummingbird-32`. **Undocumented upstream**; verified on 2026.8.12. Useful for ephemeral branch/preview/container names. |
+| `haiku([words], [separator], [digits])` | Random readable name — defaults `words=2`, `separator="-"`, `digits=2` ⇒ `fragrant-hummingbird-32`. Useful for ephemeral branch/preview/container names. |
 | `read_file(path)` | Read file contents. Blocked under `safe = true`. |
 | `range(end, [start], [step_by])` | Integer array |
 | `get_random(start, end, [seed])` | Random integer (`seed` makes it reproducible) |
@@ -373,7 +376,7 @@ PROJECT_NAME = "{{ cwd | basename }}"
 | `kebabcase`, `shoutykebabcase`, `snakecase`, `shoutysnakecase`, `lowercamelcase`, `uppercamelcase` | Case conversion (`shoutykebabcase` ⇒ `HELLO-WORLD`) |
 | `slug` / `slugify`, `striptags`, `spaceless` | Text normalization |
 | `trim`, `trim_start`, `trim_end`, `truncate(length, [end])` | Whitespace / shortening |
-| `int`, `float` | Conversions (`int(default=0)`/`float(default=0)` now **error** — v1 compat removed) |
+| `int`, `float` | Conversions. On a non-number, `int`/`float` (with or without `default=`) still return the default or `0` but **warn** (`tera-v1-int-default`); from 2027.4.0 they error |
 | `replace(from, to)`, `regex_replace(pattern, rep)` | Substitution |
 | `quote` | Escape and quote string |
 | `split(pat)`, `join(sep)`, `shuffle([seed])` | Array operations |
@@ -399,7 +402,7 @@ PROJECT_NAME = "{{ cwd | basename }}"
 | `starting_with(arg)`, `ending_with(arg)`, `containing(arg)`, `matching(regex)` | String checks |
 | `before(other, [inclusive])`, `after(other, [inclusive])` | Date comparison |
 | `dir`, `file`, `exists` | Path checks (mise custom; refused in safe mode) |
-| `semver_matching(requirement=…)` | Version satisfies a semver requirement: `{% if v is semver_matching(requirement=">=1.2") %}`. The **keyword is required** (a positional string fails to parse). Verified on 2026.10.19 with comparison operators; a caret `^1` did **not** match `1.2.3` — prefer `>=`/`<` ranges. A non-semver requirement (`1.2`) is an error |
+| `semver_matching(requirement=…)` | Version satisfies a semver requirement: `{% if v is semver_matching(requirement=">=1.2") %}`. The **keyword is required** (a positional string fails to parse). One comparator per test: `>=1.2`, `=1.2.3`, `^1.0.0`, `~1.2.0`, `*` work; caret/tilde need a full `X.Y.Z` (partial `^1`, `~1.2` silently don't match); compound ranges (`>=1.2, <2`) and bare versions (`1.2`) are errors — combine two tests with `and`. Verified on 2026.10.25 |
 | `odd`, `even`, `divisible_by(n)` | Numeric checks |
 
 **Template syntax:**
@@ -424,8 +427,9 @@ PROJECT_NAME = "{{ cwd | basename }}"
 | `value \| indent(prefix=">")` | `value \| indent(width=1)` (spaces only) |
 | `value \| truncate` | `value \| truncate(length=255)` |
 | `value \| addslashes` | no direct equivalent — chain `replace(from=…, to=…)` calls |
+| `value \| int(default=0)` on a non-number | returns 0 with a `tera-v1-int-default` warning; errors from 2027.4.0 — check the value first |
 
-Other v2 differences: `first`/`last`/`nth` on an empty list return null; the `unique` filter stays case-insensitive until **2027.4.0**, then becomes case-sensitive; under `tera_v1`, `now()` keeps its old signature.
+Other v2 differences: `first`/`last`/`nth` on an empty list still return `""` with a deprecation warning and return null from 2027.4.0 — check `items | length` first; the `unique` filter stays case-insensitive until **2027.4.0**, then becomes case-sensitive; under `tera_v1`, `now()` keeps its old signature.
 
 New v2 syntax: slices (`parts[0:2]`, `parts[-1]`, `name[::-1]`), spread (`[first, ...rest]`, `{...base, key: value}`), comprehensions, optional chaining (`env?.NODE_ENV or "development"`), ternaries (`"prod" if release else "dev"`). Undefined-variable access is **stricter** in v2, and **Tera v1 macros are unsupported**.
 

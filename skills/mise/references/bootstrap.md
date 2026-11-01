@@ -29,6 +29,10 @@ mise bootstrap --upgrade           # 2026.10.11: also upgrade packages/tools
 mise bootstrap --prune-dotfiles    # 2026.10.15: remove orphaned dotfile-group files
 mise bootstrap --prompt-vars       # 2026.10.6: ask for unanswered [vars] prompts
 mise bootstrap --take-remote-all   # resolve all dotfile-history conflicts with the remote side
+mise bootstrap --from https://github.com/you/dotfiles.git --from-dir ~/.dotfiles --config-dir .config/mise
+                                   # 2026.10.21: link ~/.config/mise to a dir inside the checkout
+                                   # (requires --from; path stays inside the checkout; the existing
+                                   # config dir must be missing, empty, or already that link)
 mise bootstrap --from 'git::https://github.com/me/dotfiles.git?ref=v1'   # 2026.9.18: ?ref= pins a
                                    # branch/tag/commit; `git::` optional; --update re-resolves the ref
 mise bootstrap unapply ssh --dry-run   # 2026.9.13: remove what a deselected module set up (destructive)
@@ -47,7 +51,9 @@ mise bootstrap services apply
 mise bootstrap compose apply
 mise bootstrap firewall apply
 mise bootstrap secrets status      # reports availability without revealing values
-mise bootstrap packages prune --manager brew-cask
+mise bootstrap packages prune --manager brew-cask           # lists what --force would also remove
+mise bootstrap packages prune --manager brew-cask --force   # 2026.10.21: also self-updating casks, casks with
+                                   # install steps, and casks installed before prune metadata existed
 ```
 
 Subcommands: `accounts`, `compose`, `files`, `firewall`, `linux` (`systemd-units`), `macos` (`defaults`, `launchd-agents`), `mise-shell-activate`, `packages` (incl. `where`, `list` alias 2026.10.16), `plan`, `plugins`, `remote`, `repos`, `secrets`, `services` (incl. `remove`), `status` (alias `ls`), **`unapply`** (2026.9.13), `user`. `mise bootstrap dotfiles …` still works but is **hidden** since 2026.10.5 — use **`mise dot …`**. The old spellings `mise bootstrap launchd|systemd|macos-defaults` **warn** (since 2026.10.4, removed **2027.10.4**) — use `macos launchd-agents`, `linux systemd-units`, `macos defaults`.
@@ -90,7 +96,7 @@ The secrets preflight also covers `[dotfiles]` `mode = "template"` entries. Boot
 
 Each phase is runnable on its own: `mise bootstrap packages apply`, `mise bootstrap macos defaults apply`, `mise bootstrap linux systemd-units apply`, `mise bootstrap repos update`, `mise bootstrap user apply`, etc. `mise bootstrap packages brew tap|untap` manages third-party Homebrew taps; `mise bootstrap packages import|prune|upgrade|use` syncs brew formulae; `mise bootstrap repos exec` runs a command across checkouts.
 
-> System-package installs are gated by `[settings.system_packages]` (`sudo`, `managers`, **`elevate_with`** — since 2026.10.9 mise falls back from `sudo` to `run0` (systemd 256+) then `doas`; pin one with `elevate_with = "run0"` / `MISE_SYSTEM_PACKAGES_ELEVATE_WITH`; **`ostree`** — on Fedora Atomic/rpm-ostree hosts `"error"` (default) or `"layer"`, which uses `rpm-ostree install --idempotent --allow-inactive`, shows `pending reboot`, skips pins, and fails `upgrade` with a hint). The related `system_deps` setting (`prompt` default, `auto`, `warn`, `ignore`) controls how vfox `PLUGIN.systemDependencies` are surfaced — `prompt` falls back to `warn` non-interactively, and detection never fails an install.
+> System-package installs are gated by `[settings.system_packages]` (`sudo`, `managers`, **`elevate_with`** — since 2026.10.9 mise falls back from `sudo` to `run0` (systemd 256+) then `doas`; **global config only** since 2026.10.20 (a project value is ignored with a warning); `elevate_with = ""` means never elevate (2026.10.22, e.g. Termux); pin one with `elevate_with = "run0"` / `MISE_SYSTEM_PACKAGES_ELEVATE_WITH`; **`ostree`** — on Fedora Atomic/rpm-ostree hosts `"error"` (default) or `"layer"`, which uses `rpm-ostree install --idempotent --allow-inactive`, shows `pending reboot`, skips pins, and fails `upgrade` with a hint). The related `system_deps` setting (`prompt` default, `auto`, `warn`, `ignore`) controls how vfox `PLUGIN.systemDependencies` are surfaced — `prompt` falls back to `warn` non-interactively, and detection never fails an install.
 
 ### `[bootstrap]` Configuration
 
@@ -103,7 +109,7 @@ config_roots = ["bundles/*"]
 dotfile_groups = ["home", "zsh"]   # 2026.10.3: which [dotfile_groups] apply on THIS machine
                                    # (unset = all groups; a more-local list replaces others)
 
-# System packages — managers: apk: apt: aur: brew: brew-cask: dnf: flatpak: flatpak-user:
+# System packages — managers: apk: apt: aur: brew: brew-cask: choco: dnf: flatpak: flatpak-user:
 #   macos-app: mas: nix: pacman: scoop: snap: winget: zypper:
 [bootstrap.packages]
 "apt:build-essential" = "latest"
@@ -141,7 +147,13 @@ artifact = "Example.app"
 # 2026.9.4+ `env` selector gates an entry on the active mise environment
 "apt:postgresql-client" = { version = "latest", env = ["ci", "staging"] }
 "pacman:libreoffice-fresh" = { state = "absent" }   # declare removal — ONLY pacman, scoop, snap,
-                                    # and zypper remove; other managers just report drift
+                                    # zypper (and dnf on rpm-ostree with ostree = "layer") remove;
+                                    # other managers just report drift
+# 2026.10.20: Chocolatey (Windows, choco.exe on PATH; skipped elsewhere). apply/upgrade need an ELEVATED
+# terminal (mise doesn't bypass UAC). Pins must match Chocolatey's version string exactly; reboot exit
+# codes 1641/3010 count as success. No state = "absent", import, or prune — deleting an entry leaves it.
+"choco:git" = "latest"
+"choco:visualstudio2022buildtools" = "117.12.0"
 
 # 2026.10.9: third-party apt sources (deb822 file in /etc/apt/sources.list.d/mise-<name>.sources, key
 # inline; apt ≥ 2.4). `apt-get update` runs once when sources change; sources are never removed.
@@ -162,6 +174,10 @@ caddy = { copr = "@caddy/caddy" }
 
 [bootstrap.brew]
 adopt = true                        # adopt existing app bundles globally (per-cask: adopt = true)
+homebrew_metadata = true            # 2026.10.20, default false, Apple Silicon only: write Homebrew's cask
+                                    # metadata after install so Homebrew owns the cask from then on (mise's
+                                    # apply/upgrade/prune skip it; status --json reports managed_by, 2026.10.25).
+                                    # Not for third-party-tap casks or a custom appdir.
 taps = { "homebrew/cask-fonts" = "https://github.com/homebrew/homebrew-cask-fonts" }
 
 # Secret inputs — stable logical names; fnox owns providers/auth
@@ -208,6 +224,15 @@ state = "running"
 enabled = true
 # full field set: builtin, command, description, enabled, environment, masked,
 #                 on_change, requires_tools, restart, scope, state, working_directory
+
+# 2026.10.20: an EXISTING systemd user unit — scope = "user" with neither command nor builtin, managed via
+# `systemctl --user` (no root; .service implied, .socket/.timer work). Only state/enabled/masked allowed.
+# A missing unit or no user manager shows `unknown` and apply fails. Linux only: on macOS/Windows such an
+# entry makes a full `mise bootstrap` FAIL — keep it in a Linux-only config.
+[bootstrap.services.gnome-keyring-daemon]
+scope = "user"
+state = "running"
+enabled = true
 
 # `builtin` selects a mise-provided service: "history-watch" (dotfiles history watcher)
 # or "tool-update" (2026.10.4: hourly global tool auto-updates)
@@ -308,6 +333,16 @@ process_type = "Background"   # 2026.9.12+ → launchd ProcessType:
 nice = 10                     # -20..20
 keep_alive_on_failure = true  # KeepAlive = { SuccessfulExit = false }; not with keep_alive
 
+# 2026.10.20: LaunchEvents, keyed by stream then an event name you choose (launchd's property case;
+# quote stream names with dots; no TOML datetimes; strings templated, ~ not expanded). The program must
+# consume the stream with xpc_set_event_stream_handler — this is not a general notification hook.
+[bootstrap.macos.launchd.agents.usb-handler]
+program = "~/.local/bin/device-handler"
+[bootstrap.macos.launchd.agents.usb-handler.launch_events."com.apple.iokit.matching".apple-usb]
+IOProviderClass = "IOUSBHostDevice"
+idVendor = 1452
+IOMatchLaunchStream = true
+
 [bootstrap.linux.systemd.units.my-sync]
 description = "sync files"
 exec_start = "~/.local/bin/my-sync --watch"
@@ -348,10 +383,11 @@ run = [
   "mise exec -- rustup component add rustfmt clippy",
 ]
 [bootstrap.hooks.post-defaults]
+description = "Restart the Dock"   # 2026.10.22: printed instead of the command
 run = "killall Dock || true"
 
 [tools]
-node = "lts"
+node = "lts"                        # Node.js 26 since 2026.10.22
 python = "3.12"
 
 # Custom task — the last app-level step, after tools install
@@ -413,7 +449,7 @@ Manage dotfiles declaratively; applied during `mise bootstrap` (step 10) or stan
 
 ```toml
 [settings]
-dotfiles.root = "~/.dotfiles"      # default source root
+dotfiles.root = "~/.dotfiles"      # default source root; templates allowed (2026.10.20): "{{ mise_config_dir }}/home"
 dotfiles.default_mode = "symlink"  # symlink|symlink-each|copy|template
 
 [dotfiles]
@@ -434,11 +470,21 @@ dotfiles.default_mode = "symlink"  # symlink|symlink-each|copy|template
 # encrypt has no effect on symlink/copy/template entries)
 "~/.config/app/token" = { mode = "track", encrypt = true }
 
-# 2026.10.4/10.5: MERGE edit — own only the keys present in the source within a JSON/TOML/YAML
-# target (comments + key order preserved for TOML/YAML); "missing" only adds absent keys;
-# unapply leaves merged keys in place; source may be omitted for merge entries
+# 2026.10.4/10.5: MERGE edit — own only the keys present in the source within a JSON/JSONC/TOML/
+# YAML/INI target (JSONC 2026.10.22 and INI 2026.10.23 are edited in place, keeping comments; key order
+# preserved for TOML/YAML); "missing" only adds absent keys; unapply leaves merged keys in place;
+# source may be omitted for merge entries. `format` (json|jsonc|toml|yaml|ini) is needed when the
+# extension doesn't say: a .json target without it is STRICT JSON (comments rejected).
+# `permissions` on a merge applies only when the merge creates the file.
 "~/.codex/config.toml/shared" = { source = "codex/shared.toml", merge = true }
 "~/.config/tool/settings.json/defaults" = { source = "tool/defaults.json", merge = "missing" }
+"~/.config/Code/User/settings.json/shared" = { source = "vscode/shared.json", merge = true, format = "jsonc" }
+"~/.config/pip/pip.conf/shared" = { source = "pip/shared.conf", merge = true, format = "ini" }
+
+# 2026.10.22: create_if_missing — write a copy/template/content entry only when nothing exists there
+"~/.config/mise/conf.d/private.local.toml" = { source = "templates/private.toml", mode = "copy", permissions = "0600", create_if_missing = true }
+# 2026.10.23: fnox mode — contents come from fnox (>= 1.44.0; `fnox set --file ~/.npmrc` first)
+"~/.npmrc" = { mode = "fnox" }
 
 # 2026.10.5: local-only history (stored in $MISE_STATE_DIR/history-local, never pushed to origin;
 # rejects encrypt and variants) — CLI: mise dot track --local <path>
@@ -476,7 +522,9 @@ default = true
 | New field (2026.9.13–9.16) | Rules |
 |----------------------------|-------|
 | `mode = "absent"` | Deletes a regular file or symlink (never follows the link; never removes a dir/socket/FIFO — errors even with `--force`). No `source`/`content`/edit keys, no globs. Works with destination `variants` (e.g. remove only on macOS). Status `absent` once gone, `would remove` while present. `mise dot unapply` skips it; `mise oci build` adds a whiteout. **This is the way to clean up a file you stopped managing** — merely deleting the entry leaves it in place. |
-| `permissions` | Works with `copy`, `template` (file source), inline `content`. **On its own** it manages only an existing target's permissions (missing target → warning, status `applied` with reason `target absent; permissions not applied`). Not with `symlink`/`symlink-each`/`track`/directory sources; ignored on Windows. |
+| `mode = "fnox"` (2026.10.23) | Whole-file contents stored in fnox (needs fnox ≥ 1.44.0 on PATH). No `source`/`content`/`exclude`/`manifest`/`encrypt`/`remove_empty`/`create_if_missing`/`merge`/edit keys and no glob targets; accepts `permissions` (default `0600`) and `variants`. `mise dot edit` runs `fnox edit --file`; `mise dot add` won't capture it; `diff` never prints content; `--dry-run` never calls fnox; `unapply` removes it only while it still matches fnox unless `--force`; `mise oci build` skips it. |
+| `create_if_missing` (2026.10.22) | `copy`/`template` file sources and inline `content`. Writes only when nothing exists at the target; an existing file (or symlink) is left alone and reports `applied`; a deleted target is re-created; a directory at the target is a conflict. `unapply` leaves it unless `--force`. |
+| `permissions` | Works with `copy`, `template` (file source), inline `content`, `fnox`, and `merge` edits (only when the merge creates the file, 2026.10.22). **On its own** it manages only an existing target's permissions (missing target → warning, status `applied` with reason `target absent; permissions not applied`). Not with `symlink`/`symlink-each`/`track`/directory sources; ignored on Windows. |
 | `remove_empty` | Template mode only. An empty/whitespace render removes the target if it still holds what mise last wrote (else conflict; `--force` overrides), plus now-empty parent dirs mise created inside `$HOME`. |
 | `relative` | Relative symlink targets; requires `symlink`/`symlink-each`; overrides the `dotfiles.relative_symlinks` setting (default `false`). Ignored on Windows (junctions). |
 | `dot_prefix` | Stow `--dotfiles`: source components `dot-<name>` deploy as `.<name>`. `exclude`/`manifest` match **source** names. A `dot-bashrc` + `.bashrc` collision fails. `mise dot add` refuses to capture into a `dot_prefix` entry (groups accept). |
@@ -487,7 +535,7 @@ default = true
 
 - `encrypt = true` (track entries only) stores encrypted contents in Git while the live file stays plaintext. Shared recipients come from `[history].encryption.recipients`; re-encrypt existing history with `mise dot save --re-encrypt` (2026.10.6).
 - `variants` are history **streams** in track mode, or optional **destinations** in deployment modes. A variant `target` needs an explicit `source` (or a safe relative entry key when every variant has a target) and is **not supported in track mode**.
-- Templates (`mode = "template"`) can reference `[bootstrap.secrets]` via `{{ secret(name="…") }}` (2026.9.7+). Commands that render templates (`add`, `apply`, `diff`, `edit`, `status`, `unapply`) accept `--prompt-secrets`; without a value, rendering **fails closed**. Textual diffs redact resolved secret values.
+- Templates (`mode = "template"`) can reference `[bootstrap.secrets]` via `{{ secret(name="…") }}` (2026.9.7+), and so can `merge = "missing"` + `template = "tera"` edits (2026.10.24; they prompt only for keys missing from the target, `status`/`diff` never prompt, and `mise bootstrap` doesn't preflight them, so an unavailable secret stops the run at that entry; enforced `merge = true` can't use `secret()`). Commands that render templates (`add`, `apply`, `diff`, `edit`, `status`, `unapply`) accept `--prompt-secrets`; without a value, rendering **fails closed**. Textual diffs redact resolved secret values.
 
 > 🔒 `mise oci build` renders dotfile templates with a **restricted engine**: `secret()` is rejected and the `env` context, `get_env()`, `exec()`, and `read_file()` are unavailable, so ambient credentials cannot be baked into a publishable image layer.
 
@@ -503,7 +551,8 @@ mise dot status [--missing] [--json] [-v]   # default view lists only entries ne
                                             # (alias: ls); JSON adds `reason` on differs + permission-only
 mise dot apply [--dry-run] [--verbose] [--yes] [--force]
 mise dot apply --prune                      # 2026.10.3: also remove files from deselected/deleted groups
-mise dot add ~/.zshrc [--no-apply]          # capture a live file (applies by default)
+mise dot add ~/.zshrc [--no-apply]          # capture a live file (applies by default); refuses a
+                                            # mode = "template" target unless --force (2026.10.21)
 mise dot add ~/.config/starship.toml --group home   # 2026.10.3: capture into a dotfile group
 mise dot diff                               # changes needed to apply
 mise dot edit [--apply] [--group NAME] ~/.zshrc
@@ -546,14 +595,29 @@ exclude = ["README.md"]
 
 # Per machine, e.g. ~/.config/mise/config.local.toml
 [bootstrap]
-dotfile_groups = ["home", "zsh"]   # unset = ALL groups apply; [dotfiles] entries always apply
+dotfile_groups = ["home", "zsh"]   # unset = ALL declared groups apply; [dotfiles] entries always apply
 ```
+
+**Groups without a table (2026.10.21):** a name in `[bootstrap] dotfile_groups` with no `[dotfile_groups.<name>]` table but a matching directory under `dotfiles.root` becomes a default group (that directory, target `~`, `symlink-each`). These exist **only while a list selects them**; a declared table always wins.
+
+**Edits in groups (2026.10.23):** `[dotfile_groups.<n>.entries]` can hold block, line, and merge edits keyed `<path>/<id>`; they apply only while the group is selected:
+
+```toml
+[dotfile_groups.common]
+root = "common"
+
+[dotfile_groups.common.entries]
+"~/.config/mise/conf.d/private.local.toml/defaults" = { source = "../templates/private.toml", merge = "missing", permissions = "0600" }
+```
+
+The edited file must be inside the group's target (no `..`); a relative `source` starts at the group root; a whole-file-only key such as `mode` on an edit makes mise **ignore the whole group** with a warning. Deselecting the group leaves what the edit wrote — run `mise dot unapply <path>` while the group is still selected to remove a block or line.
 
 - Group names match `^[A-Za-z0-9_.-]+$`; a more-local config with the same group name **replaces** the whole group table.
 - Two selected groups may not deploy the same file, nor may one link a directory whole while another places files in it — the conflict is reported before anything is written.
 - Entries without `source` find it under the group root at the same relative path; entries without `mode` deploy like the group; walking entries inherit `dot_prefix`, `manifest`, and slash-less `exclude`s. Every entry must lie inside the group's `target`.
 - **Deselecting or deleting a group leaves its files** — mise records deployments under `$MISE_STATE_DIR/dotfiles/groups` and `mise dot status` lists them as **`orphaned`**. Clean up with `mise dot apply --prune` (every group; asks unless `--yes`) or `mise dot unapply --group <name>`. Both only remove links still pointing at the source / copies still holding what mise wrote (`--force` for changed copies), and never remove through linked dirs or inside `dotfiles.root`.
-- `mise dot add <file>` captures into the deepest containing group (choose with `--group` for a new file); `manifest = "git"` groups refuse `add`. Group entries are **whole-file only**; `mise bootstrap --prune-dotfiles` (2026.10.15) also removes orphaned files.
+- `mise dot add <file>` captures into the deepest containing group (choose with `--group` for a new file); `manifest = "git"` groups refuse `add`. `mise bootstrap --prune-dotfiles` (2026.10.15) also removes orphaned files.
+- **Switching from GNU Stow (2026.10.21):** a directory Stow folded into one link is replaced by a real directory of per-file links without `--force`; a link into the group root that points at the wrong directory is refused even with `--force`.
 - `mise oci build` does **not** include dotfile groups.
 
 ### Dotfiles History (`mise dot` / `[history]`)

@@ -21,7 +21,7 @@
 
 ### Backends Overview
 
-mise supports **20 backends** plus custom backend plugins (`mise backends ls` on 2026.10.19: aqua, asdf, cargo, conda, core, dotnet, forgejo, gem, github, gitlab, go, http, npm, **packslip**, **pypi**, s3, **spinel**, spm, ubi, vfox — `pipx` is an alias of `pypi`, not listed). The count is unchanged from 2026.9.12 because **pkgx was removed (2026.9.13)** and **spinel was added (2026.10.2, experimental)**. The registry assigns tools to backends by an **acceptance-tier** preference order — prefer the highest tier available for a given tool:
+mise supports **20 backends** plus custom backend plugins (`mise backends ls` on 2026.10.25: aqua, asdf, cargo, conda, core, dotnet, forgejo, gem, github, gitlab, go, http, npm, **packslip**, **pypi**, s3, **spinel**, spm, ubi, vfox — `pipx` is an alias of `pypi`, not listed). The count is unchanged from 2026.9.12 because **pkgx was removed (2026.9.13)** and **spinel was added (2026.10.2, experimental)**. The registry assigns tools to backends by an **acceptance-tier** preference order — prefer the highest tier available for a given tool:
 
 | Tier | Backends | When chosen |
 |------|----------|-------------|
@@ -166,17 +166,17 @@ CLI tool-option syntax uses brackets: `mise use "conda:ruff[channel=bioconda]"`,
 | Exact | `"20.0.0"` | Specific version |
 | Prefix | `"20"` | Latest matching prefix |
 | Latest | `"latest"` | Most recent stable |
-| `lts` | `"lts"` | LTS release (node); also `lts-iron`, `lts-jod`, `lts-krypton` |
+| `lts` | `"lts"` | Active LTS release (node): **26** since 2026.10.22 (`lts-lithium`); older lines `lts-iron`, `lts-jod`, `lts-krypton` (24). Pin `node@24` or `lts-krypton` to stay on 24 |
 | `prefix:<P>` | `"prefix:1.19"` | Latest matching prefix (explicit form — needed where a bare `1.20` would be exact, e.g. Go) |
 | `ref:<SHA>` | `"ref:master"` | Compile from git ref (npm git sources and spm too; **not** cargo, python, or erlang) |
 | `path:<PATH>` | `"path:./shfmt"` | Use a custom install dir. Relative paths resolve from the config root. **Requires trust since 2026.10.9** (in `mise.toml`, `.tool-versions`, and idiomatic files); ignored in safe mode. On Windows use TOML literal strings (`{ path = 'C:\tools\node' }` — `"C:\tools"` silently becomes a tab); paths containing `& \| < > ^ %` are rejected |
 | `system` | `"system"` | No mise install — mise adds nothing to PATH, so whatever is already on PATH runs |
-| `sub-<PARTIAL>:<BASE>` | `"sub-2:lts"` | **Numeric subtraction**, not "Nth previous release": resolve BASE, subtract PARTIAL's components, resolve as a prefix. `sub-2:lts` → 20 becomes 18; `sub-0.1:latest` → 3.11 becomes 3.10. |
+| `sub-<PARTIAL>:<BASE>` | `"sub-2:lts"` | **Numeric subtraction**, not "Nth previous release": resolve BASE, subtract PARTIAL's components, resolve as a prefix. `sub-2:lts` → 26 becomes 24; `sub-0.1:latest` → 3.11 becomes 3.10. |
 | `tag:<TAG>` | `"tag:v1.0.0"` | Cargo git tag |
 | `branch:<BRANCH>` | `"branch:main"` | Cargo git branch |
 | `rev:<SHA>` | `"rev:abc1234"` | Cargo git rev |
 
-> **Resolution nuance:** in config files, `node@20` means the latest *installed* 20.x. But `mise install node@20`, `mise latest node@20`, and `mise upgrade node@20` resolve to the latest *available* 20.x. A prefix matches at separators — `1.2` matches `1.2.3` and `1.2+build` but **not** `1.20`. npm-style ranges (`^24`, `>=20`) warn and are then treated as a literal version (which fails to install). `mise use node` with no version writes `latest`. Cargo git sources accept `tag:`/`branch:`/`rev:` but **not** `ref:`.
+> **Resolution nuance:** in config files, `node@20` means the latest *installed* 20.x. But `mise install node@20`, `mise latest node@20`, and `mise upgrade node@20` resolve to the latest *available* 20.x. A prefix matches at separators — `1.2` matches `1.2.3` and `1.2+build` but **not** `1.20`. npm-style ranges (`^24`, `>=20`) warn and are then treated as a literal version (which fails to install). `mise use node` with no version writes `latest` but reuses the newest **installed** version (2026.10.20); write `mise use node@latest` to install the newest release. Cargo git sources accept `tag:`/`branch:`/`rev:` but **not** `ref:`.
 
 **Structured tool selectors (2026.7.11+)** are uniform across root `[tools]`, inline task defs, task templates, and file-task headers. Exactly one selector is required; conflicting, missing, or non-string selectors are a hard config error:
 
@@ -218,7 +218,7 @@ Universal options supported by every backend:
 > ```
 > Checked: cargo, conda, gem, github, gitlab, forgejo, go, http, npm, packslip, pipx/pypi, s3, spinel, spm, ubi. **Not** checked: aqua, core tools, and plugins — vfox passes unknown options to the plugin (`ctx.options`), asdf exposes them as `MISE_TOOL_OPTS__<KEY>`. `mise config explain` and `mise lsp` flag typos before install.
 
-> 🔴 **Inline options require trust (security, 2026.9.18 / 2026.10.0).** Any tool **key** containing `[` — `"github:cli/cli[api_url=https://ghe.example.com/api/v3]" = "latest"` — makes a `mise.toml` require `mise trust`, and since 2026.10.0 the same applies to `.tool-versions` entries (GHSA-wcqh-j26q-g44x). Inline options can redirect downloads, so they are no longer treated as "safe" config. Prefer the table form, which is reviewed like any other config.
+> 🔴 **Inline options require trust (security, 2026.9.18 / 2026.10.0).** Any tool **key** containing `[` — `"github:cli/cli[api_url=https://ghe.example.com/api/v3]" = "latest"` — makes a `mise.toml` require `mise trust`, and since 2026.10.0 the same applies to `.tool-versions` entries (GHSA-wcqh-j26q-g44x). Inline options can redirect downloads, so they are no longer treated as "safe" config. A tool **table** with any option (`jq = { version = "1.7.1", os = ["macos"] }`) needs trust as well — an untrusted `mise.toml` loads only plain version strings (or arrays of them), `min_version`, and secret-less `[tasks]`.
 
 > `github_attestations` is **not** universal — it is a `github:` backend tool option. The separate *global* `github_attestations` setting (default `true`) applies to supported tools.
 
@@ -248,7 +248,7 @@ python = "3.12.11"
 }
 ```
 
-Tool option values support template expansion referencing `env.*` and `vars.*` (including values produced by `_.source`/`_.file`); nested option arrays/tables are Tera-rendered too (2026.7.7+).
+Tool option values support template expansion referencing `env.*` and `vars.*` (including values produced by `_.source`/`_.file`); nested option arrays/tables are Tera-rendered too (2026.7.7+). Tera filters on `version` work (2026.10.20): `url = "https://example.com/tool-{{ version | replace(from='-build1', to='') }}.tar.gz"`. Keep `env`/`vars` and `version` in **separate** `{{ }}` blocks — an expression that mixes them is rendered at install time, where `env`/`vars` render empty without an error (`{{ env.D ~ version }}` loses `env.D`).
 
 ### Backend-Specific Configuration
 
@@ -290,7 +290,7 @@ The project **must publish Packslip manifests** — this backend never infers in
 "packslip:github.com/aubepkg/aube" = { version = "latest", workflow = ["release-plz.yml", "release.yml"] }
 ```
 
-`minimum_release_age` uses the **verified transparency-log time**; a logged entry with no verified time counts as too new. Private repos retry the download through the API with your token. Packslip pins are checked by **repository ID** (10.19) — after a rename run `mise packslip forget <tool>`.
+`minimum_release_age` uses the **verified transparency-log time**; a logged entry with no verified time counts as too new. Private repos retry the download through the API with your token. Packslip pins are checked by **repository ID** (10.19) — after a rename run `mise packslip forget <tool>`. Whether a GitHub repo publishes `.well-known/packslip.json` is looked up through mise-versions first (2026.10.21), falling back to GitHub for private repos, `use_versions_host = false`, or a `url_replacements` rule; the result is verified either way.
 
 **Settings:** `packslip.exec` (default `false` — run a tool's own command at install time to produce a resource its packslip offers only as an `exec` entry; does **not** disable on-demand completion generation), `packslip.stampers` (hosts whose signed stamp lists say which releases may be installed, each with its pin).
 
@@ -350,9 +350,10 @@ Use the `extras` option (not `#egg=`) and set `package_name` if the guessed dist
 | `expose` | Like `with`, but also exposes their entry points. Requires **uv ≥ 0.8.5**; participates in locking. |
 | `dependency_prereleases` | uv prerelease policy: `disallow` \| `allow` \| `if-necessary` \| `explicit` |
 | `registry_url` | Per-tool index (include a `{}` placeholder for the package name); overrides `pypi.registry_url`. Covers listing and locking only — version-only installs need the index in `uvx_args`/`pipx_args`. A URL with credentials or a query string can't be recorded in the lockfile |
+| `registry_index` | **2026.10.24.** How dependency locking uses `registry_url`: `"default"` (the registry replaces PyPI — the tool and every dependency must come from it) or `"priority"` (registry first, then `pypi.registry_url`). Each project comes only from the first index that hosts it. In `priority` mode locking ignores `UV_EXTRA_INDEX_URL`, `UV_INDEX_URL`, and `install_env`. Affects locking only — use it for Gitea/Forgejo/pypiserver indexes that host only your packages: `"pypi:my-tool" = { version = "latest", registry_url = "https://gitea.example/api/packages/org/pypi/simple/{}/", registry_index = "priority" }` |
 | `python` | **2026.10.12.** A CPython minor or exact patch installed as a **private** dependency of the tool and recorded as a `python` entry in the same lockfile scope. Works for uv and pipx installs; can't be combined with `--python`/`-p` in `uvx_args`/`pipx_args` |
 | `uvx` | `false` selects the pipx installer (version-only locking). `uvx = true` cannot override `pypi.uvx = false` |
-| `uvx_args` / `pipx_args` | Free-form installer args. **Version-only installs only** — rejected by explicit dependency locking. |
+| `uvx_args` / `pipx_args` | Free-form installer args. **Version-only installs only** — `mise lock <tool>` naming the tool errors; a bare `mise lock` sweep warns and writes a version-only entry (2026.10.21). |
 | `install_env` | Env during install |
 
 > A `with`/`expose` requirement pinned to an exact version **narrows the locked Python range** to what that release supports, so the tool may need a newer interpreter than it declares. Guard with a marker: `"legacy==1.0.0; python_version < '3.12'"`.
@@ -446,7 +447,7 @@ linux-x64 = { asset_pattern = "gh_*_linux_x64.tar.gz" }
 macos-arm64 = { asset_pattern = "gh_*_macOS_arm64.tar.gz" }
 ```
 
-**Tool options:** `asset_pattern` (must match the **whole** asset name; shortest match wins), `additional_asset_patterns`, `matching`, `matching_regex`, `version_prefix` (default: strip a leading `v`, and on GitHub also a repo-name prefix like `tectonic@0.15.0`; `version_prefix = ""` keeps tags verbatim), `platforms` (per-platform `asset_pattern`/`additional_asset_patterns`/`url`/`checksum`/`size`/`bin`/`bin_path`/…), `strip_components`, `bin`, `rename_exe`, `bin_path`, `filter_bins`, `format` (force archive type: `tar.gz`, `zip`, `7z`, `raw`, …), `checksum`, `size`, `no_app`, `api_url`, `prerelease`, `github_attestations`, and **`slsa_signer_identity`** (Tera — `{{ version }}`) + **`slsa_signer_issuer`** (2026.9.16; without both, SLSA is skipped; with `locked_verify_provenance` a missing signer is an error).
+**Tool options:** `asset_pattern` (must match the **whole** asset name; shortest match wins), `additional_asset_patterns`, `matching`, `matching_regex`, `version_prefix` (default: strip a leading `v`, and on GitHub also a repo-name prefix like `tectonic@0.15.0`; `version_prefix = ""` keeps tags verbatim), `version_regex` (2026.10.20 — a Rust regex the **raw tag** must match to be listed, resolved, or installed; it matches anywhere, so anchor it: `version_regex = '^(v\d+\.\d+\.\d+|nightly)$'`; with `version_prefix`, a tag needs both; an invalid pattern is a hard error), `platforms` (per-platform `asset_pattern`/`additional_asset_patterns`/`url`/`checksum`/`size`/`bin`/`bin_path`/…), `strip_components`, `bin`, `rename_exe`, `bin_path`, `filter_bins`, `format` (force archive type: `tar.gz`, `zip`, `7z`, `raw`, …), `checksum`, `size`, `no_app`, `api_url`, `prerelease`, `github_attestations`, and **`slsa_signer_identity`** (Tera — `{{ version }}`) + **`slsa_signer_issuer`** (2026.9.16; without both, SLSA is skipped; with `locked_verify_provenance` a missing signer is an error).
 
 ```toml
 "github:myorg/mytool" = { version = "latest", slsa_signer_identity = "https://github.com/myorg/mytool/.github/workflows/release.yml@refs/tags/v{{version}}", slsa_signer_issuer = "https://token.actions.githubusercontent.com" }
@@ -454,7 +455,7 @@ macos-arm64 = { asset_pattern = "gh_*_macOS_arm64.tar.gz" }
 
 **Direct per-platform URL** — skip asset selection entirely: `platforms.linux-x64.url = "https://…/tool-{{ version }}-linux.tar.gz"` (or flat `platform_linux_x64_url`). `{{ version }}` is the resolved version even for `latest`. A **top-level** `url` is ignored by github.
 
-**Listing:** reads 1 page of 100 releases, up to 3 pages while no stable release with assets has been found; releases with **no assets** are hidden from `mise ls-remote` (unless every platform has a `url` — a `url` on only some platforms lists asset-less releases everywhere); `MISE_LIST_ALL_VERSIONS=1` reads every page. Autodetection skips SBOM/signature/checksum sidecar assets (2026.10.1); ties go to the shortest name. On a checksum mismatch mise hints that the maintainer probably re-uploaded the asset.
+**Listing:** reads 1 page of 100 releases, up to 3 pages while no stable release with assets has been found; releases with **no assets**, and tags excluded by `version_prefix`/`version_regex`, are hidden from `mise ls-remote` (unless every platform has a `url` — a `url` on only some platforms lists asset-less releases everywhere); `MISE_LIST_ALL_VERSIONS=1` reads every page. Autodetection skips SBOM/signature/checksum sidecar assets (2026.10.1); ties go to the shortest name. On a checksum mismatch mise hints that the maintainer probably re-uploaded the asset.
 
 **Security (2026.10.19, fail-closed):** SLSA provenance must come from a workflow run in the tool's repo (or the signing-workflow repo) **and** be built from the release's tag — a `slsa_signer_identity` pointing at a branch build no longer verifies; renames are confirmed only via api.github.com. Attestations aren't checked for a custom `api_url` (GHES). Archives containing symlinks that point outside the install dir are refused. On Windows `filter_bins`/`symlink_bins` `.mise-bins` entries are copies (reinstall older installs).
 
@@ -492,7 +493,7 @@ additional_asset_patterns = ["ollama-linux-amd64-rocm.tgz"]
 
 #### GitLab / Forgejo Backends
 
-Same forge option surface as GitHub (`asset_pattern`, `additional_asset_patterns`, `matching`, `matching_regex`, `version_prefix`, `platforms` incl. per-platform `url`, `bin`, `bin_path`, `rename_exe`, `filter_bins`, `format`, `checksum`, `size`, `strip_components`, `no_app`, `api_url`). `slsa_*` and `github_attestations` are **github-only**. Forgejo defaults `api_url` to `https://codeberg.org/api/v1`. **GitLab** matches the release-link **display name** (e.g. `asset_pattern = "binary: Linux amd64"`, then set `bin`/`format`), reads only the newest 100 releases (`MISE_LIST_ALL_VERSIONS=1` for all), and `latest` is the newest listed release; `prerelease` works on both — `latest`/prefix skip prerelease-looking names unless `prerelease = true`.
+Same forge option surface as GitHub (`asset_pattern`, `additional_asset_patterns`, `matching`, `matching_regex`, `version_prefix`, `version_regex`, `platforms` incl. per-platform `url`, `bin`, `bin_path`, `rename_exe`, `filter_bins`, `format`, `checksum`, `size`, `strip_components`, `no_app`, `api_url`). `slsa_*` and `github_attestations` are **github-only**. Forgejo defaults `api_url` to `https://codeberg.org/api/v1`. **GitLab** matches the release-link **display name** (e.g. `asset_pattern = "binary: Linux amd64"`, then set `bin`/`format`), reads only the newest 100 releases (`MISE_LIST_ALL_VERSIONS=1` for all), and `latest` is the newest listed release; `prerelease` works on both — `latest`/prefix skip prerelease-looking names unless `prerelease = true`.
 
 ```toml
 "gitlab:gitlab-org/gitlab-runner" = "16.8.0"
@@ -643,7 +644,7 @@ Since **2026.7.18**, installs record the effective `features`/`default-features`
 
 npm tools resolved from a `mise.lock` pin are auto-trusted through the low-download gate — reproducing an existing lockfile no longer needs `allow_low_downloads`.
 
-Supports minimum-release-age protection for transitive dependencies via compatible package managers (`npm >= 6.9.0` via `--before`, 11.10.0+ via `--min-release-age`; `aube`; `bun >= 1.3.0`; `pnpm >= 10.16.0`). Supply-chain scanning: `AUBE_SECURITY_SCANNER=/abs/path/scanner.mjs` (Node 22.6+), or Socket Firewall as `sfw mise install npm:x`.
+Supports minimum-release-age protection for transitive dependencies via compatible package managers (`npm >= 6.9.0` via `--before`, 11.10.0+ via `--min-release-age`; `aube`; `bun >= 1.3.0`; `pnpm >= 10.16.0`). Supply-chain scanning: `AUBE_SECURITY_SCANNER=/abs/path/scanner.mjs` (Node 22.6+), or Socket Firewall as `sfw mise install npm:x` (Socket Firewall intercepts TLS, so give mise its CA: `sfw sh -c 'MISE_EXTRA_CA_CERTS="$NODE_EXTRA_CA_CERTS" mise upgrade'`).
 
 #### Go Backend
 
@@ -665,9 +666,9 @@ Supports minimum-release-age protection for transitive dependencies via compatib
 
 **Tool options:** `install_env`, and **`source`** (2026.9.18) — a per-gem registry URL, added alongside the default sources rather than replacing them:
 ```toml
-"gem:internal-tool" = { version = "1.4.2", source = "https://rubygems.pkg.github.com/myorg" }
+"gem:internal-tool" = { version = "latest", source = "https://rubygems.pkg.github.com/myorg" }
 ```
-Credentials go in the URL as basic auth (redacted in output; https required except on localhost). A `https://rubygems.pkg.github.com/<org>` source **without** credentials uses mise's GitHub token (needs `read:packages`) and requires an **exact version pin**, because GitHub Packages can't list versions.
+Credentials go in the URL as basic auth (redacted in output; https required except on localhost). A `https://rubygems.pkg.github.com/<org>` source **without** credentials uses mise's GitHub token (needs `read:packages`). Sources without the JSON versions API (GitHub Packages and similar) are listed from their compact index (2026.10.23), so `latest`, prefixes, `mise outdated`, and `mise upgrade` work; GitHub Packages publishes no release dates, so `minimum_release_age` can't filter those versions. `latest` skips RubyGems prereleases (`4.1.0.beta3`) — request one explicitly or set `MISE_PRERELEASES=1` (2026.10.24).
 
 Requires `gem` (Ruby) on PATH. Each tool gets its own `GEM_HOME`; patch upgrades of mise Ruby keep working via the minor-version path, but a **minor** Ruby change needs `mise install -f "gem:*"`.
 
@@ -772,9 +773,9 @@ node = { version = "24", lazy = true }
 - **Registry tools** derive their command names from the registry's `bins` metadata. **Explicit or non-registry backends must declare them** with `lazy_bins`.
 - A bare `mise install` **skips** lazy declarations — use `mise install --include-lazy` to provision them all.
 - Lazy tools also install when their command is invoked from a `mise run` task or `mise x` (2026.9.1+), matching activated-shell behavior. mise inserts the shim farms *after* real tool paths for lazy toolsets.
-- Lazy tools are **not** reported as `missing: <tool>` on project entry or a bare `mise install`, regardless of `status.missing_tools` (2026.9.8+). Ordinary missing tools still are.
+- Lazy tools are **not** reported as `missing: <tool>` on project entry or a bare `mise install`, regardless of `status.missing_tools` (2026.9.8+), and `mise doctor` doesn't list them as problems (2026.10.21). Ordinary missing tools still are. `mise ls` shows an uninstalled lazy tool as `(lazy)` (2026.10.23) — or `(missing)` when it can't install on first use (explicit backend without `lazy_bins`, or refused by safe mode); `--json` still reports `"installed": false`.
 - Invoking a lazy shim also installs that provider's configured `depends`. `mise install <lazy-tool>` installs just that one. Run `mise reshim` after hand-editing a lazy declaration.
-- A bare `mise upgrade` **skips** lazy tools that aren't installed (2026.10.11); `mise outdated` marks them `[MISSING] (lazy)`. Lazy install works even with `not_found_auto_install` off. A lazy declaration never overrides a higher-precedence non-lazy one. Safe mode gives **project** lazy tools no bootstrap shims (2026.10.19).
+- A bare `mise upgrade` **skips** lazy tools with no installed version (2026.10.11); `mise outdated` marks them `[MISSING] (lazy)`. If another version of the tool is installed, the lazy request is treated like any missing version. Lazy install works even with `not_found_auto_install` off. A lazy declaration never overrides a higher-precedence non-lazy one. Safe mode gives **project** lazy tools no bootstrap shims (2026.10.19).
 
 **Related path settings (2026.9.0+):** `shims_dir` (`MISE_SHIMS_DIR`), `system_installs_dir` (`MISE_SYSTEM_INSTALLS_DIR`), `system_shims_dir` (`MISE_SYSTEM_SHIMS_DIR`), plus `mise reshim --system` — for system-scoped and collocated layouts.
 
@@ -909,11 +910,13 @@ mise completion zsh > /usr/local/share/zsh/site-functions/_mise
 mise completion fish > ~/.config/fish/completions/mise.fish
 # powershell
 mise completion powershell | Out-String | Invoke-Expression
+# nushell (2026.10.20; `nu` also works)
+mise completion nushell --install   # then `source` the printed path in config.nu
 ```
 
 `mise completion --install` writes self-contained scripts directly.
 
-`mise completion <shell> --install` destinations: bash `~/.local/share/bash-completion/completions/mise`; zsh `~/.local/share/zsh/site-functions/_mise` (prints the `fpath` line to add); fish `~/.config/fish/completions/mise.fish`; PowerShell `~/.config/powershell/completions/mise.ps1` (Windows: `%LOCALAPPDATA%\PowerShell\completions\mise.ps1`). Homebrew, pacman, the Ubuntu PPA, and COPR packages install completions for you; the mise.run installer does not.
+`mise completion <shell> --install` destinations: bash `~/.local/share/bash-completion/completions/mise`; zsh `~/.local/share/zsh/site-functions/_mise` (prints the `fpath` line to add); fish `~/.config/fish/completions/mise.fish`; PowerShell `~/.config/powershell/completions/mise.ps1` (Windows: `%LOCALAPPDATA%\PowerShell\completions\mise.ps1`); Nushell `~/.config/nushell/completions/mise.nu`. Homebrew, pacman, the Ubuntu PPA, and COPR packages install completions for you; the mise.run installer does not.
 
 > 🔴 **2026.8.11:** mise's own CLI moved from clap to usage-rs, and completions/help are now generated from compiled usage metadata rather than an external `usage` CLI. As a result **`--include-bash-completion-lib` and `--usage` are hidden no-ops.** Command behavior, flags, and aliases are otherwise preserved.
 
@@ -956,9 +959,9 @@ mise skills sync --dir .agents/skills      # link them where your agent looks (-
 
 **Lockfiles are not created automatically.** With `lockfile` unset, mise **updates existing lockfiles but doesn't create new ones** — create one with `mise lock` (or `touch mise.lock && mise install`). `MISE_LOCKFILE=1` keeps that update-only behavior and is *not* the same as `lockfile = true`. Global lockfiles are only created by `mise lock --global`. The docs now recommend **committing `mise.lock`**.
 
-> 🔴 **Lockfiles are rebuilt completely by default (2026.10.19).** `lockfile_mode` now defaults to **`generate`** (no longer experimental): installs rebuild `mise.lock` from the current requests, reuse unchanged entries, and also lock the **other platforms**. Revert with `lockfile_mode = "merge"` or `MISE_LOCKFILE_MODE=merge`. Neither mode creates lockfiles. `lockfile_auto_prune` (default `true`, 2026.10.4) makes a full `mise lock` drop tools absent from the active config — set it `false` for a lockfile shared by different envs. Generate mode deletes unreferenced sidecars; merge mode never does.
+> 🔴 **Lockfiles are rebuilt completely by default (2026.10.19).** `lockfile_mode` now defaults to **`generate`** (no longer experimental): installs rebuild `mise.lock` from the current requests, reuse unchanged entries, and also lock the **other platforms**. `lockfile_mode = "merge"` still restores the old behavior but is **deprecated** (2026.10.24; warns from 2027.4.0, removed in 2027.10.0) — remove the line instead. Neither mode creates lockfiles. `lockfile_auto_prune` (default `true`, 2026.10.4) makes a full `mise lock` drop tools absent from the active config — set it `false` for a lockfile shared by different envs. Generate mode deletes unreferenced sidecars; merge mode never does.
 
-**What gets locked:** config `[tools]`, **task tools** (including task templates and included task files), and tool stubs. `.tool-versions` tools are **not** locked. `conf.d` files share the parent directory's lockfile; idiomatic files use the nearest `mise.toml`'s lockfile. `lockfile = false` together with `locked = true` is an error. **Default platforms for a new lockfile:** `linux-x64`, `linux-x64-musl`, `linux-arm64`, `linux-arm64-musl`, `macos-x64`, `macos-arm64`, `windows-x64`, plus the current platform (`--platform` qualifiers: `gnu`, `glibc`, `musl`, `msvc`, `baseline`, `musl-baseline`; Bun adds `-baseline` on CPUs without AVX2).
+**What gets locked:** config `[tools]`, **task tools** (including task templates and included task files), and tool stubs. `.tool-versions` tools are **not** locked. `conf.d` files share the parent directory's lockfile; idiomatic files use the nearest `mise.toml`'s lockfile. `lockfile = false` together with `locked = true` fails as soon as a tool must actually be installed (`locked mode requires lockfile to be enabled`); `mise ls` and already-installed tools still work. **Default platforms for a new lockfile:** `linux-x64`, `linux-x64-musl`, `linux-arm64`, `linux-arm64-musl`, `macos-x64`, `macos-arm64`, `windows-x64`, plus the current platform (`--platform` qualifiers: `gnu`, `glibc`, `musl`, `msvc`, `baseline`, `musl-baseline`; Bun adds `-baseline` on CPUs without AVX2).
 
 ```toml
 lockfile_version = 3
@@ -1035,7 +1038,7 @@ Per-config lockfiles pair with their config: `mise.toml`→`mise.lock`, `mise.te
 
 For the current platform, `mise lock` **downloads the artifact and performs full cryptographic verification at lock time**, so the entry is backed by real verification rather than registry metadata. Cross-platform entries record detected provenance without verifying. The old `github_attestations = "unavailable"` marker is **no longer written** and is ignored on read — mise probes again.
 
-Settings: `lockfile` (unset ⇒ update existing lockfiles, never create new ones), `locked = true` (require lockfile-resolved URLs; blocks API calls — good for CI), `locked_verify_provenance` (default `false`; auto-on with `paranoid`/`paranoid = ["provenance"]`), `lockfile_platforms`, `lockfile_mode` (**`generate`** default since 2026.10.19 \| `merge`), `lockfile_auto_prune` (default `true`), `locked_scopes` (default `["global","project","system"]`, global-only; `[tool_config] locked` applies even when `locked_scopes` excludes the scope).
+Settings: `lockfile` (unset ⇒ update existing lockfiles, never create new ones), `locked = true` (require lockfile-resolved URLs; blocks API calls — good for CI), `locked_verify_provenance` (default `false`; auto-on with `paranoid`/`paranoid = ["provenance"]`), `lockfile_platforms`, `lockfile_mode` (**`generate`** default since 2026.10.19 \| `merge`, deprecated 2026.10.24), `lockfile_auto_prune` (default `true`), `locked_scopes` (default `["global","project","system"]`, global-only; `[tool_config] locked` applies even when `locked_scopes` excludes the scope).
 
 **Lockfile revisions** (`lockfile_version`):
 
@@ -1065,7 +1068,8 @@ uv tree --project .mise/locks/pypi-black/24.10.0    # inspect a sidecar directly
 - Sidecar locations follow the lockfile (`.mise/locks/`, `.config/mise/locks/`) or a symlink target; digests normalize CRLF. `mise lock --sidecars` lists what to commit.
 - Ordinary `mise install` validates and accepts hand-edited sidecars; `mise install --locked` **rejects digest mismatches** until you run `mise lock`.
 - Python graph locking needs **uv ≥ 0.12.10** and published **wheels** for the target platform — explicit `mise lock` and locked installs never build sdists. Git sources, standalone pipx installs, and free-form `uvx_args`/`pipx_args` stay **version-only**.
-- Lock generation needs an interpreter discoverable by uv, though it need not match the tool's configured Python version.
+- `mise lock` resolves against the tool's selected Python whenever mise has it installed, even off `PATH`; for a per-tool `python` that isn't installed yet, uv may download one just for resolution (not with `offline`) (2026.10.24).
+- When the tool's own release has no upload time (common on self-hosted indexes), `mise lock` exempts the tool from the `minimum_release_age` cutoff while its dependencies keep it. A graph that can't be locked, or that `uv sync --frozen --no-build` says isn't installable (2026.10.21), produces a warning and a version-only entry.
 
 > 🔴 **Revision 2+ is not readable by older mise versions.** Revision 2+ `--locked` installs fail if a recorded graph is missing or its digest doesn't match.
 
@@ -1161,7 +1165,7 @@ mise installs migrate [-n] [TOOL@VERSION]…      # reinstall legacy installs in
 
 **Verified download cache (2026.10.7):** finished downloads are stored in `$MISE_CACHE_DIR/downloads-cas` and **re-hashed before reuse**; requests send ETag/Last-Modified so a `304` reuses the file; tools with a pinned checksum (tool option, `mise.lock`, packslip digest) skip the network entirely (http, github, aqua, packslip, precompiled core tools). Under `--locked`/paranoid only pinned-checksum entries are reused. Settings: `download_cache` (default `true`; `MISE_DOWNLOAD_CACHE=0` off), `download_cache_max_size` (default `2GiB`, `0` = unlimited, LRU). Supersedes `always_keep_download` (deprecated; warns 2026.11.0, removed 2027.11.0).
 
-**Extraction guard (2026.10.19):** `extract_max_ratio` (global-only, default `100`, `0` disables) fails an extraction that exceeds 256 MiB **and** is more than ratio × the download size; HTTP bodies are capped at 128 MiB. **`prune.exclude`** (2026.10.4) names tools never removed by `prune`, `ls --prunable`, or post-upgrade cleanup; prune also keeps versions used by running processes.
+**Extraction guard (2026.10.19):** `extract_max_ratio` (global-only, default `100`, `0` disables) fails an extraction that exceeds 256 MiB **and** is more than ratio × the download size; HTTP bodies are capped at 128 MiB. **`prune.exclude`** (2026.10.4) names tools never removed by `prune`, `ls --prunable`, or post-upgrade cleanup; prune also keeps versions used by running processes (for a process started through a runtime link such as `installs/claude/latest`, only the version it runs — 2026.10.22) and versions needed by tasks from `task_config.includes`, default task dirs, and `#MISE tools=` scripts (2026.10.24).
 
 ### CLI Commands for Tools
 
@@ -1196,7 +1200,9 @@ mise ls --outdated          # Tools with newer versions
 mise ls --monorepo          # Across monorepo config roots
 mise ls -b aqua --grouped   # 2026.9.13: filter by backend (repeatable; works with --json) /
                             # one section per backend (not with --json)
-mise ls -m / --missing      # Configured but not installed (also --all-sources, --prefix, -i, -g, -l)
+mise ls -m / --missing      # Configured but not installed (also --all-sources, --prefix, -i, -g)
+mise ls --no-global         # 2026.10.22: skip global/system config (--local / -l are deprecated aliases)
+mise ls --project           # 2026.10.22: only the nearest directory with a mise config
 mise ls-remote node         # List available versions
 mise ls-remote --prerelease # Include pre-releases
 mise ls-remote --all node   # Every version, ignoring filters; -J includes created_at
@@ -1206,7 +1212,11 @@ mise which node             # Show real binary path (-t/--tool <TOOL@VER>, --plu
 mise where node@22          # Show install directory
 mise bin-paths              # List active runtime bin paths
 mise tool <TOOL>            # Backend/description/config-source/tool-options for one tool (--url: registry URL)
-mise uninstall node@20      # Remove an installed tool version
+mise uninstall node@20      # Remove an installed tool version (matches 20, 20.x, 20-…; never 200)
+mise uninstall --project --dry-run  # 2026.10.22: remove every version the nearest project's
+                            # config files name (installs are shared; path:/system skipped)
+mise shell node@22          # Set MISE_NODE_VERSION in this shell; --unset --all clears every
+                            # MISE_<TOOL>_VERSION (2026.10.22)
 mise unuse node@20          # Remove one version from config (keeps siblings); prunes ONLY that version
                             # (2026.10.18); --no-prune keeps it installed
 mise link node@custom ./dir # Symlink an external install into mise
@@ -1216,7 +1226,8 @@ mise registry               # List all available tools
 mise backends ls            # List available backends (`mise b` alias deprecated, removed 2027.4.0)
 mise backends switch [-n] [-g] [TOOL@VER]  # 2026.9.13: move locked tools to the registry's new backend
 mise fmt                    # Format mise.toml (sort keys, clean whitespace)
-mise outdated               # Check for updates (--global, --local, --inactive, -J)
+mise outdated               # Check for updates (--global, --no-global, --inactive, -J); lists tools
+                            # whose version lookup failed instead of "All tools are up to date"
 mise upgrade                # Update versions (respects mise.toml ranges)
 mise upgrade --global       # 2026.10.7: only global/system requests, even inside a project
                             # (as if run outside any project; --bump writes global config)
@@ -1226,7 +1237,7 @@ mise upgrade -b             # 2026.8.6+ shorthand for --bump (old -l deprecated,
 mise upgrade --no-prune     # Keep the replaced version indefinitely (2026.8.1+)
 mise upgrade --prune        # Force IMMEDIATE removal, skipping the upgrade.prune_after grace period
 mise upgrade -i             # Interactive selection
-mise upgrade -x node        # --exclude a tool; also --inactive, --local
+mise upgrade -x node        # --exclude a tool; also --inactive, --no-global
 mise upgrade node@latest --bump   # 2026.9.13: persists the selector `latest`, not a concrete version
 mise install --force        # 2026.8.4+ works with no tool args: reinstall every configured tool
 mise lock --upgrade         # Migrate a lockfile to the newest revision (3)

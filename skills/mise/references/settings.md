@@ -97,7 +97,7 @@ mise searches upward from cwd to root (stops at `MISE_CEILING_PATHS`). Merge beh
 - **`[secrets.*]`:** per field, project config only
 - **`[daemons]`:** per daemon · **`[daemons_settings]`:** per key (ignored in global/system config)
 
-**Write targeting:** `mise use`, `mise set`, `mise unset` write to the lowest-precedence file in the highest-precedence directory — with both present, writes go to `mise.toml`, not `mise.local.toml` (`mise use --env local node@20` targets `mise.local.toml`). `mise unuse` targets the **first loaded config that declares the tool** (`--path` to choose); `mise config get/set` default to the **highest-precedence loaded** file (`--file` to choose).
+**Write targeting:** `mise use`, `mise set`, `mise unset`, and `mise tasks add` write to the lowest-precedence file in the highest-precedence directory — with both present, writes go to `mise.toml`, not `mise.local.toml` (`mise use --env local node@20` targets `mise.local.toml`). `mise unuse` targets the **first loaded config that declares the tool** (`--path` to choose); `mise tasks set` / `mise tasks rm` (2026.10.25) use the one loaded file that defines the task and stop when several do (`--env`/`--global`/`--path` to choose); `mise config get/set` default to the **highest-precedence loaded** file (`--file` to choose).
 
 **Useful commands:**
 ```bash
@@ -177,7 +177,7 @@ Supported files include `.nvmrc`, `.node-version`, `package.json`, `.python-vers
 
 ### Key Settings Reference
 
-mise ships **351 settings** (leaf count from `https://mise.jdx.dev/schema/mise.json` on 2026.10.19: 177 top-level keys, 40 of which are nested namespaces — note `mise settings --all` prints only the ~213 that resolve to a value, omitting unset optional ones). **Changed defaults/types:** `lockfile_mode` `merge` → **`generate`** (2026.10.19); `java.shorthand_vendor` `openjdk` → **`temurin`** (2026.10.5); `paranoid` bool → **bool or list** (2026.10.14); `env_file` path → **list** (2026.10.14); `fetch_remote_versions_cache` `"1h"` → **unset** (2026.10.11, see below). This is a representative subset — run `mise settings --all` (or `mise settings ls`) for the live list, and `mise settings set <key> <value>` / `mise settings get <key>` to manage them.
+mise ships **354 settings** (leaf count from `https://mise.jdx.dev/schema/mise.json` on 2026.10.25: 180 top-level keys, 40 of which are nested namespaces — note `mise settings --all` prints only the ~216 that resolve to a value, omitting unset optional ones). **Changed defaults/types:** `lockfile_mode` `merge` → **`generate`** (2026.10.19); `java.shorthand_vendor` `openjdk` → **`temurin`** (2026.10.5); `paranoid` bool → **bool or list** (2026.10.14); `env_file` path → **list** (2026.10.14); `fetch_remote_versions_cache` `"1h"` → **unset** (2026.10.11, see below). This is a representative subset — run `mise settings --all` (or `mise settings ls`) for the live list, and `mise settings set <key> <value>` / `mise settings get <key>` to manage them.
 
 ```toml
 [settings]
@@ -208,7 +208,9 @@ windows_powershell_no_profile = true   # -NoProfile for pwsh tasks (default true
 
 # Environment
 env_shell_expand = true     # Shell-style expansion — DEFAULT TRUE
-env_cache = false           # experimental — cache computed environment (never caches secret-bearing envs, 2026.10.3)
+env_cache = false           # labelled experimental, but not gated on experimental = true (2026.10.25) — cache computed
+                            # environment (skips secret-bearing envs, 2026.10.3)
+env_cache_redacted = false  # 2026.10.25, labelled experimental (not gated) — also cache envs with redact = true directives
 env_cache_ttl = "1h"        # Cache TTL
 env_file = [".env", ".env.local"]  # MISE_ENV_FILE (list since 2026.10.14; ':'-separated env var)
 auto_env = false            # Auto-load platform config files (default-on in 2027.6.0)
@@ -261,7 +263,7 @@ tool_update.check_duration = "24h"  # interval for per-tool auto_update = true (
 download_cache = true               # 2026.10.7: verified download cache ($MISE_CACHE_DIR/downloads-cas)
 download_cache_max_size = "2GiB"    # 0 = unlimited (LRU)
 extract_max_ratio = 100             # 2026.10.19: decompression-bomb guard (0 = off) — global only
-lockfile_mode = "generate"          # 2026.10.19 default (was merge); "merge" = incremental
+lockfile_mode = "generate"          # 2026.10.19 default; "merge" (incremental) deprecated 2026.10.24, removed 2027.10.0
 lockfile_auto_prune = true          # 2026.10.4: full `mise lock` drops tools absent from config
 install_layout = "legacy"           # experimental: "identity" (Windows + experimental ⇒ identity)
 prune.exclude = []                  # tools never pruned
@@ -290,6 +292,10 @@ cache_prune_age = "30d"             # Age before cached downloads are pruned
 use_versions_host = true            # Use mise-versions shared version cache
 offline = false                     # Block all HTTP requests
 prefer_offline = false              # Prefer cached data
+ipv4_only = false                   # 2026.10.22: IPv4 only for mise's own HTTP connections (git/npm/aube follow the system)
+# extra_ca_certs = "~/certs/corp.pem"  # 2026.10.24, global only: PEM bundle ADDED to the usual roots (absolute or ~/ path)
+#   for mise's own HTTP client — downloads, version lookups, GitHub API, attestations, vfox. Unlike SSL_CERT_FILE it
+#   never replaces the system store; an unusable file warns and keeps the usual roots. npm: tools read NODE_EXTRA_CA_CERTS.
 
 # UI / shell
 color = true                # Colorized output
@@ -388,7 +394,7 @@ insecure_registries = []
 # Dotfiles
 [settings.dotfiles]
 default_mode = "symlink"    # symlink|symlink-each|copy|template
-root = "~/.dotfiles"
+root = "~/.dotfiles"         # templates render here (2026.10.20): "{{ mise_config_dir }}/home"
 relative_symlinks = false   # 2026.9.14: Stow-style relative links (per-entry `relative` overrides)
 windows_symlinks = false    # 2026.10.15: real symlinks for symlink-each on Windows
 
@@ -400,7 +406,7 @@ logs = false                # also export task output lines
 # System packages
 [settings.system_packages]
 sudo = true                 # set managers = [...] to pick package managers
-# elevate_with = "run0"     # 2026.10.9: sudo → run0 → doas fallback; pin one here
+# elevate_with = "run0"     # GLOBAL config only (2026.10.20); unset = sudo → run0 → doas, "" = never elevate (2026.10.22)
 ostree = "error"            # 2026.10.9: rpm-ostree hosts — "error" | "layer"
 
 # Java (core tool)
@@ -421,7 +427,7 @@ shorthand_vendor = "temurin"   # 2026.10.5 default (was openjdk)
 | `activate_shims` | bool | `true` | `false` keeps tool shim dirs off PATH during activation and hooks (2026.9.2+), so external [command wrappers](wrappers.md#command-wrappers-wrappers) keep working |
 | `shims_dir` / `system_shims_dir` / `system_installs_dir` | path | — | Shim/install locations for system-scoped and collocated layouts (2026.9.0+) |
 | `shims.exclude` | string[] | `[]` | Command names mise should **never** create shims for, leaving them to the system (2026.9.10+) |
-| `lockfile_mode` | enum | **`generate`** | `generate` (default since 2026.10.19, no longer experimental — rebuild from current requests, reuse unchanged entries, lock other platforms) or `merge` (incremental). `provenance_verified` is never a trust signal. |
+| `lockfile_mode` | enum | **`generate`** | `generate` (default since 2026.10.19, no longer experimental — rebuild from current requests, reuse unchanged entries, lock other platforms) or `merge` (incremental; **deprecated** 2026.10.24, warns from 2027.4.0, removed 2027.10.0). `provenance_verified` is never a trust signal. |
 | `locked_scopes` | string[] | `["global","project","system"]` | Config scopes where invocation-wide `locked` mode is enforced |
 | `no_env` | bool | unset | Do not load env vars from config files (matches `--no-env`) |
 | `no_hooks` | bool | unset | Do not execute hooks from config files (matches `--no-hooks`) |
@@ -440,7 +446,7 @@ shorthand_vendor = "temurin"   # 2026.10.5 default (was openjdk)
 | `skills.*` | — | — | See [Agent Skills](dev-tools.md#packslip-man-pages-and-agent-skills) |
 | `history.*` | — | — | See [Dotfiles History](bootstrap.md#dotfiles-history-mise-dot--history) |
 
-**Global-config-only settings (45 in `settings.toml`, 40 excluding deprecated aliases)** — ignored when set from project config: `auto_update`/`auto_update_check_duration` (deprecated → `self_update.auto`/`self_update.check_duration`), `ci`, `extract_max_ratio`, `forgejo.credential_command`, `github.credential_command`, `gitlab.credential_command`, `github.enterprise_hosts`, `github.oauth_cache_get`, `github.oauth_cache_set`, `github.oauth_cache_secure_enclave`, `github_relay.{concurrency,log_format,log_requests,max_duration,request_timeout}`, `history.allow_plaintext_history`, **`history.describe_command`** (global-only since 2026.9.7, a security fix), `locked_scopes`, `paranoid`, `safe`, `self_update.api_url`, `self_update.auto`, `self_update.check_duration`, `self_update.repository`, `shims_dir`, `system_installs_dir`, `system_shims_dir`, `task.cache.remote_oidc_audience`, `task.cache.remote_token`, `task.cache.remote_token_file` (plus their deprecated flat `task.cache_remote_*` aliases), `tool_update.global_auto`, `tool_update.check_duration`, `trusted_config_paths`, `unix_default_file_shell_args`, `unix_default_inline_shell_args`, `windows_default_file_shell_args`, `windows_default_inline_shell_args`, `write_targets.{tools,packages,dotfiles}`, `yes`. Beyond this list, an **untrusted** project's entire `[settings]` table is ignored (2026.10.13). `[daemons_settings]` is the inverse — **ignored from global/system config** — and `[daemon_providers]` is allowed **only** in global config.
+**Global-config-only settings (48 in `settings.toml`, 43 excluding deprecated aliases)** — ignored with a warning when set from project config: `auto_update`/`auto_update_check_duration` (deprecated → `self_update.auto`/`self_update.check_duration`), `ci`, `extra_ca_certs`, `extract_max_ratio`, `forgejo.credential_command`, `github.credential_command`, `gitlab.credential_command`, `github.enterprise_hosts`, `github.oauth_cache_get`, `github.oauth_cache_set`, `github.oauth_cache_secure_enclave`, `github_relay.{concurrency,log_format,log_requests,max_duration,request_timeout}`, `history.allow_plaintext_history`, **`history.describe_command`** (global-only since 2026.9.7, a security fix), `locked_scopes`, `paranoid`, `ruby.apply_patches` (2026.10.20), `safe`, `self_update.api_url`, `self_update.auto`, `self_update.check_duration`, `self_update.repository`, `shims_dir`, `system_installs_dir`, `system_packages.elevate_with` (2026.10.20), `system_shims_dir`, `task.cache.remote_oidc_audience`, `task.cache.remote_token`, `task.cache.remote_token_file` (plus their deprecated flat `task.cache_remote_*` aliases), `tool_update.global_auto`, `tool_update.check_duration`, `trusted_config_paths`, `unix_default_file_shell_args`, `unix_default_inline_shell_args`, `windows_default_file_shell_args`, `windows_default_inline_shell_args`, `write_targets.{tools,packages,dotfiles}` (a project value warns only when a global write would have used it, 2026.10.20), `yes`. Beyond this list, an **untrusted** project's entire `[settings]` table is ignored (2026.10.13). `[daemons_settings]` is the inverse — **ignored from global/system config** — and `[daemon_providers]` is allowed **only** in global config.
 
 > **`gpg_verify` behavior (2026.7.12+):** GPG verification **always runs** when enabled, with Node/Swift signatures verified in-process via rPGP (no external `gpg` binary). Previously a missing `gpg` silently skipped verification — you must now set `gpg_verify = false` explicitly to opt out.
 
@@ -478,9 +484,9 @@ Tasks automatically receive:
 ```yaml
 - uses: actions/checkout@v7
 - id: mise
-  uses: jdx/mise-action@v5      # latest v5.2.3 (2026-10-24); v5 is the current major
+  uses: jdx/mise-action@v5      # latest v5.2.5 (2026-10-31); v5 is the current major
   with:
-    version: 2026.10.19   # pin mise (default: newest release ≥ minimum_release_age old)
+    version: 2026.10.25   # pin mise (default: newest release ≥ minimum_release_age old)
     minimum_release_age: 24h   # v5 DEFAULT; "0s" restores v4's "newest release" behavior
     # sha256: "…"         # verify the mise binary
     install: true         # run `mise install`
@@ -519,7 +525,7 @@ Tasks automatically receive:
 > - **v5.0.1:** a cached/existing mise binary is integrity-verified (signed checksums or the `sha256` input) before running; version switches do a full install.
 > - **v5.1.1:** the GitHub token is **no longer exported** as `MISE_GITHUB_TOKEN` to later steps. `persist_github_token: true` restores it, or pass a different (e.g. read-only) token value.
 > - New outputs: `cache-hit`, `versions` (JSON of `{version, requested_version, install_path, source}` per tool), and one output per tool (`steps.mise.outputs.node`).
-> - **v5.2.x (2026-10):** the binary is verified against the release's signed `packslip.sigstore.json` — for mise ≥ 2026.9.3 a **missing packslip is a hard error** (v5.2.1); PATH entries come from `mise env --paths`; the cache key also hashes `conf.d/*.toml` (v5.2.2) and searches only the working directory and its parents (v5.2.3) — each key change causes one cache miss.
+> - **v5.2.x (2026-10):** a mise restored from cache is re-verified against cached signed checksums (v5.2.4), so a network failure at that step no longer fails the job; the binary is verified against the release's signed `packslip.sigstore.json` — for mise ≥ 2026.9.3 a **missing packslip is a hard error** (v5.2.1); PATH entries come from `mise env --paths`; the cache key also hashes `conf.d/*.toml` (v5.2.2) and searches only the working directory and its parents (v5.2.3) — each key change causes one cache miss.
 
 Behavior worth knowing: PATH entries are added individually via `GITHUB_PATH` from `mise env --paths` (the runner's complete PATH is not copied into `GITHUB_ENV`). When a `mise.lock` exists in the working directory or a parent, the action **automatically appends `--locked`** — unless you supply `mise_toml`/`tool_versions` inputs. `install_args` cannot be combined with `bootstrap: true`. Values flagged `redact = true` or matching `redactions` are masked automatically. Cache-key templating supports `{{version}}`, `{{cache_key_prefix}}` (default `mise-v1`), `{{platform}}`, `{{file_hash}}`, `{{mise_env}}`, `{{install_args_hash}}`, `{{bootstrap_hash}}`, `{{plugins_hash}}`, `{{env.VAR_NAME}}`, `{{default}}`, and `{{#if …}}…{{/if}}` conditionals. `wings_enabled` (experimental mise-wings asset cache via OIDC; needs `permissions: id-token: write`).
 
@@ -557,7 +563,7 @@ build-job:
 ```yaml
 # Official -debian image (mise, curl, git, CA certs preinstalled; no wrapper needed)
 build-job:
-  image: ghcr.io/jdx/mise:2026.10.19-debian
+  image: ghcr.io/jdx/mise:2026.10.25-debian
   variables:
     MISE_DATA_DIR: $CI_PROJECT_DIR/.mise
     MISE_CACHE_DIR: $CI_PROJECT_DIR/.mise/cache
@@ -575,13 +581,13 @@ build-job:
 
 | Tag | Contents |
 |-----|----------|
-| `2026.10.19`, `2026.10`, `latest` | **scratch** image (static binary + CA certificates, **no shell**) — intended for `COPY --from=` |
+| `2026.10.25`, `2026.10`, `latest` | **scratch** image (static binary + CA certificates, **no shell**) — intended for `COPY --from=` |
 | `debian`, `*-debian` | Debian slim base with `curl` and `git` |
 | `dev` | Unsupported source-built image |
 
 ```Dockerfile
 FROM debian:13-slim
-COPY --from=ghcr.io/jdx/mise:2026.10.19 /usr/local/bin/mise /usr/local/bin/mise
+COPY --from=ghcr.io/jdx/mise:2026.10.25 /usr/local/bin/mise /usr/local/bin/mise
 ```
 
 > 🔴 **Breaking (2026.9.12):** `:latest` is now the **scratch** image, not a usable base. CI and dev-container users should switch to the `debian` tag and install tools explicitly.
@@ -596,7 +602,7 @@ mise x -- <cmd>
 curl https://mise.run | MISE_INSTALL_SKIP_IF_EXISTS=1 sh
 
 # Reproducible: pin the version (bypasses the release-age delay)
-curl -fsSL https://mise.run | MISE_VERSION=2026.10.19 sh
+curl -fsSL https://mise.run | MISE_VERSION=2026.10.25 sh
 
 # Windows PowerShell (2026.10.15; PS 5.1+, no admin): installs ~\.local\bin\mise.exe + mise-shim.exe,
 # verified against SHASUMS256.txt, and adds it to the user Path
@@ -611,7 +617,7 @@ Installer env vars: `MISE_VERSION`, `MISE_INSTALL_PATH`, `MISE_INSTALL_FROM_GITH
 
 Or `mise generate install-script -l -w ./bin/mise` produces a self-contained `./bin/mise` you can commit, so jobs don't re-download mise (the old `mise generate bootstrap` spelling is a hidden alias until 2027.9.0). `-w` with no path writes `./bin/mise`; `--windows` also writes `<PATH>.cmd` (requires `--write`). `-l/--localize` sandboxes `MISE_DATA_DIR`/`MISE_CACHE_DIR` into a `.mise` directory in the project (`--localized-dir <DIR>` to change it); the localized wrapper trusts the project's config and ignores the user's global config, and needs `bash`, `curl`, CA certs, `tar`, and `sha256sum`/`shasum`. Without `--version`, the generated wrapper is pinned to the age-eligible release. The script honors `MISE_VERSION` and `MISE_INSTALL_PATH`.
 
-**packslip install (CI/Docker, 2026.10.x docs):** `packslip install github.com/jdx/mise --pin ps1_nlhmwtfeufglxv5myvwvronk7a [--version 2026.10.19]` (packslip ≥ 1.5.1; Linux x64/arm64, macOS arm64, Windows) installs mise with signer verification pinned to mise's repository.
+**packslip install (CI/Docker, 2026.10.x docs):** `packslip install github.com/jdx/mise --pin ps1_nlhmwtfeufglxv5myvwvronk7a [--version 2026.10.25]` (packslip ≥ 1.5.1; Linux x64/arm64, macOS arm64, Windows) installs mise with signer verification pinned to mise's repository.
 
 **Untrusted config in CI:**
 ```yaml
@@ -655,6 +661,7 @@ vim.env.PATH = vim.env.HOME .. "/.local/share/mise/shims:" .. vim.env.PATH
 - **Fixed SDK paths (2026.10.8):** point IDE settings that need a stable path (Maven home, JDK home) at `~/.local/share/mise/installs/<tool>/global` — it follows the version **global/system** config selects (see [the `global` link](dev-tools.md#install-layout-download-cache-and-the-global-link)).
 - **Xcode:** run tools with `"$HOME/.local/bin/mise" --cd "$SRCROOT" exec -- swiftlint lint`. With User Script Sandboxing, listing `$(SRCROOT)/mise.toml` as an input file is not enough for every tool (it also needs the installed executables/data dirs). Xcode Cloud: commit a wrapper and in `ci_scripts/ci_post_clone.sh` run `cd "$CI_PRIMARY_REPOSITORY_PATH"; ./bin/mise install`, then `./bin/mise exec -- swiftlint lint`.
 - **Neovim:** plugin `miser.nvim`, or the shim-PATH snippet above.
+- **Zed:** extension `hverlin/mise-zed` runs `mise lsp`, highlights task scripts, and adds run buttons for tasks and tools; Zed loads the shell environment, so `mise activate` PATH tools work without shims. Turn on semantic tokens with `{ "languages": { "mise": { "semantic_tokens": "combined" } } }`.
 - **Emacs:** package `mise.el` — `(add-hook 'after-init-hook #'global-mise-mode)`; or add the shims dir to both `PATH` and `exec-path`.
 - **Vim:** `let $PATH = $HOME . '/.local/share/mise/shims:' . $PATH`.
 
@@ -671,12 +678,12 @@ A language server for mise config files over stdin/stdout (docs: `https://mise.j
 vim.lsp.config("mise", { cmd = { "mise", "lsp" }, filetypes = { "toml" }, root_markers = { "mise.toml", ".mise.toml" } })
 vim.lsp.enable("mise")
 ```
-Helix and Emacs use the same `mise lsp` command. An older mise runs a **task** named `lsp` instead — detect support with `mise help lsp` printing `Usage: mise lsp`.
+Helix, Emacs, and Zed (through `mise-zed`) use the same `mise lsp` command. An older mise runs a **task** named `lsp` instead — detect support with `mise help lsp` printing `Usage: mise lsp`.
 
 #### Shell Setup (`/shell-setup.html`)
 
 - **PowerShell:** `(&mise activate pwsh) | Out-String | Invoke-Expression` — cd updates only on PowerShell 7+; 5.1 updates at the next prompt (warning hidden with `$env:MISE_PWSH_CHPWD_WARNING=0`).
-- **Nushell:** in `env.nu`: `^mise activate nu | save ($nu.default-config-dir | path join mise.nu) --force`; in `config.nu`: `use ($nu.default-config-dir | path join mise.nu)`.
+- **Nushell:** in `env.nu`: `^mise activate nu | save ($nu.default-config-dir | path join mise.nu) --force`; in `config.nu`: `use ($nu.default-config-dir | path join mise.nu)`. Completions: `mise completion nu --install` (2026.10.20) writes `~/.config/nushell/completions/mise.nu` and prints the `source` line for `config.nu`.
 - **Xonsh:** `execx($(mise activate xonsh))`. **Elvish:** `var mise: = (ns [&])`, `eval (mise activate elvish | slurp) &ns=$mise: &on-end={|ns| set mise: = $ns }`, `mise:activate`.
 - **Windows:** native mise can activate bash/zsh/fish inside Git Bash, MSYS2, and Cygwin; **cmd.exe can't be activated** — put `%LOCALAPPDATA%\mise\shims` on the user `Path`. Shell aliases (`[shell_alias]`) work only in bash, zsh, and fish.
 
@@ -729,6 +736,7 @@ Use an absolute binary path and `--cd` (Claude Code: `claude mcp add mise -- mis
 - `MISE_DEBUG=1` / `MISE_TRACE=1` — debug / trace logging
 - `MISE_SELF_UPDATE_MINIMUM_RELEASE_AGE` — release-age delay for self-update and the installer
 - `MISE_NOT_FOUND_AUTO_INSTALL_REGISTRY`, `MISE_DOTFILES_RELATIVE_SYMLINKS`, `MISE_OTEL_ENABLED`, `MISE_OTEL_LOGS` — settings added in 2026.9.13 through 2026.9.17
+- `MISE_EXTRA_CA_CERTS`, `MISE_IPV4_ONLY`, `MISE_ENV_CACHE_REDACTED` — 2026.10.22 through 2026.10.25
 - `MISE_SELF_UPDATE_AUTO`, `MISE_TOOL_UPDATE_GLOBAL_AUTO`, `MISE_DOWNLOAD_CACHE`, `MISE_INSTALL_LAYOUT`, `MISE_LOCKFILE_MODE`, `MISE_PYPI_KEYRING_PROVIDER`, `MISE_SYSTEM_PACKAGES_ELEVATE_WITH`, `MISE_GITHUB_ENTERPRISE_HOSTS`, `MISE_AFFECTED_{COMMITTED,UNCOMMITTED,UNTRACKED}` — 2026.10.4 through 2026.10.19
 
 **Global CLI flags:** `-C/--cd <DIR>`, `-E/--env <ENV>` (repeatable or comma list), `-j/--jobs <N>`, `-q/--quiet`, `-v/--verbose`, `-y/--yes`, `--raw`, `--locked`, `--silent`, `--no-config`, `--no-env`, `--no-hooks`. (`--output` is accepted globally but hidden — it belongs to `mise run`.)

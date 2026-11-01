@@ -7,6 +7,7 @@
 - [Groups, Namespaces, and Cross-Project Daemons](#groups-namespaces-and-cross-project-daemons)
 - [Shared Server Providers ([daemon_providers])](#shared-server-providers-daemon_providers)
 - [Service Presets](#service-presets)
+- [Container Daemons](#container-daemons)
 - [Ports and Worktrees](#ports-and-worktrees)
 
 > The usage-field rule in `SKILL.md` applies to every task example in this file.
@@ -44,6 +45,7 @@ Exactly one declaration style per entry:
 | `task = "dev:core"` | An existing mise task (optionally with `args`) |
 | `project = "../other"` (+ `name`) | A daemon declared by **another project** |
 | `provider = "local-postgres"` (+ `resource`) | A database/account on a **shared server** from global `[daemon_providers]` (2026.9.13) — see [Shared Server Providers](#shared-server-providers-daemon_providers) |
+| `image = "postgres:18"` | A container run with Docker or Podman (2026.10.24) — see [Container Daemons](#container-daemons) |
 
 ```toml
 [daemons.api]
@@ -65,10 +67,10 @@ port = 5433
 | `version` | string | Version request for the preset's tool. |
 | `init` | string \| string[] | Idempotent setup run **before** the long-running process, on every start and restart. Shares a shell with the main command. |
 | `mise` | bool | `false` disables the mise tool-environment wrapper for both setup and the main command. |
-| `port` | int \| `"auto"` \| table | Fixed port, or per-worktree allocation. Custom daemons also accept pitchfork's structured port table. |
-| `ports` | table | Overrides for a preset's additional named ports. |
+| `port` | int \| `"auto"` \| table | Fixed port, or per-worktree allocation. `run`/`task` daemons also accept pitchfork's structured port table (container daemons reject it). |
+| `ports` | table | A preset's additional named ports (integer, or `{ auto = true, base, stride }` per worktree since 2026.10.24), or a container's extra published ports. |
 | `options` | table | Preset-specific options. |
-| `data_dir` | string | Persistent preset data directory, relative to the declaring project root or absolute. Defaults to mise state storage. |
+| `data_dir` | string | Persistent preset data directory (or the host side of a container's `data_mount`), relative to the declaring project root or absolute. Defaults to mise state storage. |
 | `proxy` | string \| bool | Reverse-proxy hostname label; `false` opts out, `true` uses the daemon's name. Only a daemon with a port is routed. |
 | `proxy_tls` | enum | `terminate` \| `passthrough`. |
 | `proxy_idle_timeout` | duration \| `false` | **2026.9.18** (pitchfork ≥ 2.27.0). Stop a **proxy-started** daemon after this long without traffic (`"30m"`, `"1h"`). Explicit starts (`mise daemons start`, shell hook, `boot_start`) and their deps are exempt; dependencies without their own value inherit the requester's; `false` (or `"0"`) exempts even from a global default (`PITCHFORK_PROXY_IDLE_TIMEOUT`). Open connections count as activity; direct-port traffic does not. |
@@ -195,6 +197,50 @@ Presets supply the command, required tool, readiness check, data directory, and 
 
 Options used during **first initialization** (database names, cluster settings) do not modify existing data when changed. An explicit `[tools]` version must satisfy the preset's request (`postgres = "18.1"` satisfies a preset asking for `"18"`); multiple instances sharing a tool must use the same request. Explicit `[env]` values override preset defaults, and when several instances export the same variable the **last declaration wins**.
 
+### Container Daemons
+
+**2026.10.24**, experimental like all daemons (same `experimental = true` + pitchfork requirement). A daemon with `image` runs as `<runtime> run --rm` in the foreground, so its output is `mise daemons logs`. Docs: https://mise.jdx.dev/daemons/containers.html
+
+```toml
+[daemons.postgres]
+image = "postgres:18"
+port = { auto = true, base = 5432 }
+env = { POSTGRES_PASSWORD = "dev" }
+data_mount = "/var/lib/postgresql"
+ready_cmd = "{{ runtime }} exec {{ container }} pg_isready -U postgres"
+proxy = false                                   # not HTTP
+
+[daemons.cockroach]
+image = "cockroachdb/cockroach:v25.1.0"
+command = ["start-single-node", "--insecure"]
+port = { auto = true, base = 26257 }
+ports.http = { container = 8080, auto = true, base = 27000 }   # exports COCKROACH_HTTP_PORT
+data_mount = "/cockroach/cockroach-data"
+ready_cmd = "{{ runtime }} exec {{ container }} cockroach sql --insecure -e 'select 1'"
+proxy = false
+```
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `image` | string | Makes the daemon a container. Can't combine with `run`, `task`, `preset`, `project`, `args`, or `provider`. mise doesn't pull or build images (`docker run` pulls on first use) and doesn't start Docker Desktop / `podman machine`. |
+| `command` | string \| string[] | Replaces the image's default command. A string is shell text (like `run`); an array is passed as-is. |
+| `port` | int \| `{ auto = true, base, stride }` | Host port for the main container port. `port = "auto"` alone is **rejected** (needs `base`). |
+| `container_port` | int | Port the container listens on for `port`. Defaults to `base` (auto) or the port itself. Requires `port`. |
+| `ports.<name>` | int \| `{ container, host?, auto?, base?, stride? }` | Extra published ports. An integer uses the same number on host and container. In a table, `container` is required; `host` is a fixed host port (defaults to `container`); `auto = true` allocates per worktree (`base` defaults to `container`). `host` and `auto` are mutually exclusive. Names use letters, digits, `_` (no leading digit) and can't be `port`, `container`, or `runtime`. Exported as `<NAME>_<PORTNAME>_PORT`. |
+| `env` | table | Passed into the container **by name** (`-e VAR`), so values stay off the command line. Project `[env]` is **not** passed in. |
+| `volumes` | string[] | `source:target[:options]`. A source starting with `.`, `/`, or `~` is a host path (relative to the project root, created if missing); anything else is a named volume. |
+| `data_mount` | string | Absolute path inside the container kept on the host. |
+| `data_dir` | string | Host side of `data_mount` (relative to project root or absolute). Default: mise state dir per project root, so each worktree has its own; `mise daemons prune` removes it. Requires `data_mount`. |
+| `runtime` | `"auto"` \| `"docker"` \| `"podman"` | `auto` (default) uses docker if on PATH, else podman. `MISE_CONTAINER_RUNTIME` (any docker-compatible CLI, e.g. `nerdctl`) overrides it. Looked up inside the project's tool env, so a `[tools]`-installed runtime works. |
+| `runtime_args` | string[] | Extra `<runtime> run` args placed before the image, e.g. `["--shm-size=1g"]`. |
+
+- `command`, `container_port`, `data_mount`, `runtime`, `runtime_args`, and `volumes` on a non-`image` daemon are an error (`[daemons.X].<key> requires image`).
+- `init`, `depends`, `ready_port`, `ready_cmd`, `health_cmd`, `proxy`, `proxy_tls`, `proxy_idle_timeout`, `mise`, and `stop_signal` work as on a custom daemon; `init` runs on the **host** before the container starts.
+- `ready_cmd`/`health_cmd` placeholders: `{{ container }}`, `{{ runtime }}`, `{{ port }}` (host port of `port`), `{{ NAME }}` (host port of named port `NAME`). `{{ runtime }}` is shell text — use it in a string command or inside `["sh", "-c", "…"]`, not as an argv element. Prefer `ready_cmd` to `ready_port`: the host port opens before the server answers.
+- Ports are published on **127.0.0.1 only**, TCP only, and every published host port must differ. Like any custom daemon with a port, a container gets a proxy hostname — set `proxy = false` for databases and brokers.
+- Stop runs `<runtime> stop` (10 s grace); mise sets pitchfork's stop timeout to 15 s unless you set `stop_signal` (keep yours above 10 s). A stale container from a killed run is removed before the next start.
+- **Not supported on Windows** (the config loads; start fails with a message). Containers can't be shared-server providers.
+
 ### Ports and Worktrees
 
 ```toml
@@ -214,9 +260,9 @@ port = { auto = true, base = 3000 }            # base is REQUIRED for custom dae
 | `base` | Port used by the primary checkout | The preset's default; **required for custom daemons** |
 | `stride` | Spacing between allocation slots | `1` |
 
-There are **511 worktree offsets**. With defaults, PostgreSQL uses 5433–5943 in linked worktrees and Redis 6380–6890. A preset's named ports move with its primary port; a named port you set yourself is used exactly as written. All configured ports must be free — **mise never searches for a free port** — and two daemons in one project cannot share a port (reported at config load). Resolved ports are saved in the project's generated `state.json` and reused; changing `base`/`stride` re-resolves, so restart the daemon.
+There are **511 worktree offsets**. With defaults, PostgreSQL uses 5433–5943 in linked worktrees and Redis 6380–6890. A preset's named ports move with its primary port; a named port you set to an **integer** is used exactly as written, while `ports.<name> = { auto = true, base = 27000 }` allocates per worktree (2026.10.24; `base` defaults to that port's preset default, and the slot follows the primary port when it is auto). All configured ports must be free — **mise never searches for a free port** — and two daemons in one project cannot share a port (reported at config load, including auto named ports and container ports; collisions across worktrees or projects aren't checked, so keep bases at least 512 apart). Resolved ports are saved in the project's generated `state.json` and reused; changing `base`/`stride` re-resolves, so restart the daemon.
 
-Custom daemons with a port export `<NAME>_PORT` (uppercased, punctuation → underscores): `[daemons.api]` → `API_PORT`, `[daemons.web-ui]` → `WEB_UI_PORT`. Names that would collide (`web-ui` vs `web_ui`) or start with a digit get no variable and a warning — the daemon still runs, and pitchfork still injects `$PORT`. Independent clones and non-Git projects keep the base port; worktrees of a bare repo all get offsets.
+Custom daemons with a port export `<NAME>_PORT` (uppercased, punctuation → underscores): `[daemons.api]` → `API_PORT`, `[daemons.web-ui]` → `WEB_UI_PORT`. Names that would collide (`web-ui` vs `web_ui`, or any two non-preset daemons that would export the same `*_PORT`, such as `api` with `ports.http` and a daemon named `api-http`) or start with a digit get no variable and a warning — the daemon still runs, and pitchfork still injects `$PORT`. Independent clones and non-Git projects keep the base port; worktrees of a bare repo all get offsets.
 
 **Preset named ports (2026.9.18)** export as `<NAME>_<PORT_NAME>`: a `cockroachdb` daemon named `crdb` exports `CRDB_HTTP_PORT`; a `spicedb` named `authz` exports `AUTHZ_HTTP_PORT` and `AUTHZ_METRICS_PORT` — the port actually used (default, worktree offset, or `ports.<name>`).
 

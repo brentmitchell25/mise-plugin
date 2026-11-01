@@ -94,7 +94,7 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 ### Configuration
 - **Hooks** — cd, enter, leave, preinstall, postinstall triggers, with exact per-hook env vars and cross-config precedence
 - **File watchers** — watch patterns with automatic re-execution
-- **Settings** — ~351 configuration options across 40 namespaces, with types, defaults, and env var overrides (including the ones whose env var names don't follow the `MISE_` rule)
+- **Settings** — ~354 configuration options across 40 namespaces, with types, defaults, and env var overrides (including the ones whose env var names don't follow the `MISE_` rule)
 - **Hierarchical config** — file precedence, merge behavior, configuration environments, `conf.d` folder fragments
 - **Remote config includes** — top-level `include` pulls `[tools]`/`[env]`/`[hooks]` fragments from `git::` or `oci::` refs, with paranoid-mode SHA/digest pinning
 - **Monorepos** — workspace project graphs (Cargo/uv/Go/Node), `[monorepo.task_defaults]`, `[monorepo.path_aliases]`, `^task` upstream deps, `mise run --affected`
@@ -822,7 +822,7 @@ The skill provides Claude with comprehensive knowledge of:
 | **Machine Bootstrap** | `mise bootstrap` (20 steps: accounts, plugins, packages, files, services, firewall, compose, repos, dotfiles, shell activation, macOS defaults and login items, launchd/systemd units, login shell, tools, task), 15 package managers plus apt sources and COPR repos, run0/doas elevation, modules and `bootstrap unapply`, `mise dot` dotfiles (merge edits, local-only and per-machine history) + dotfile groups + Git-backed history, agent skills, OCI images |
 | **Dependencies** | `[deps]` providers (npm, uv, poetry, go, bundler, dart, flutter, git-submodule, …) and `mise deps` |
 | **Monorepos** | `monorepo_root`, `[monorepo].config_roots`, `[monorepo.path_aliases]`, `//path:task` syntax, workspace project graph (Cargo/uv/Go/Gradle/Node) and `[monorepo.projects]` overrides, `[monorepo.task_defaults]`, `^task` upstream deps, `mise run --affected` (incl. working-tree changes), root lockfiles |
-| **Configuration** | File hierarchy and the global override file, ~351 settings across 40 namespaces, `conf.d` file and folder fragments, remote and local `include`, merge behavior by section, `mise config explain`, minimum version, CI (`jdx/mise-action@v5`, download-cache pattern, PowerShell installer), IDE setup and the `mise lsp` language server, MCP server, deprecation calendar |
+| **Configuration** | File hierarchy and the global override file, ~354 settings across 40 namespaces, `conf.d` file and folder fragments, remote and local `include`, merge behavior by section, `mise config explain`, minimum version, CI (`jdx/mise-action@v5`, download-cache pattern, PowerShell installer), IDE setup and the `mise lsp` language server, MCP server, deprecation calendar |
 | **Best Practices** | DO/DON'T patterns, complete examples, common gotchas |
 
 ## Requirements

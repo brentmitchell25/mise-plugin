@@ -6,7 +6,7 @@
 
 > The usage-field rule in `SKILL.md` applies to every task example in this file.
 
-Added **2026.8.16**. Intercept an ordinary command name with a different command, arguments, and environment. Wrappers take precedence over mise-managed tools, and mise **strips its own dispatch directories before delegating**, so the underlying tool still resolves from mise or the system.
+Added **2026.8.16**. Intercept an ordinary command name with a different command, arguments, and environment. Wrappers take precedence over mise-managed tools. While a wrapper's command runs, mise removes its shims dir from PATH and skips **that wrapper** for the command and everything it starts (tracked in `__MISE_ACTIVE_WRAPPERS`, 2026.10.23), so the underlying tool still resolves from mise or the system — other wrappers still apply.
 
 ```toml
 [wrappers]
@@ -26,7 +26,7 @@ env = { MBX_CARGO_SHIM_MODE = "1" }
 | `args` | string[] | Arguments inserted **before** the intercepted command's own arguments |
 | `env` | table | Environment variables set for the wrapper |
 
-Works with normal activation, `mise activate --shims`, and `mise exec`, and (since 2026.9.15) through Windows exe/file shims. Managed wrapper shims are refreshed by `mise reshim`. Since **2026.9.13** a wrapper **installs a missing provider tool before dispatching** (lazy providers always; others when `not_found_auto_install` is on, the default). Shim and wrapper dirs are removed from PATH while the wrapper runs. A remote [`include`](settings.md#remote-config-includes-include) fragment may carry `[wrappers]`; the including file's entry wins. Safe mode ignores project `[wrappers]`. Docs: `https://mise.jdx.dev/dev-tools/shims.html#command-wrappers`.
+Works with normal activation, `mise activate --shims`, and `mise exec`, and (since 2026.9.15) through Windows exe/file shims. Managed wrapper shims are refreshed by `mise reshim`. Since **2026.9.13** a wrapper **installs a missing provider tool before dispatching** (lazy providers always; others when `not_found_auto_install` is on, the default). Wrappers chain (2026.10.23): a `node` started by a wrapped `pnpm` gets the `node` wrapper's `args`/`env`, a wrapper whose `command` is itself wrapped runs that wrapper too, and two wrappers that delegate to each other end at the real tool. A real command reachable **only** through a project `[env] _.path` dir fails with `<cmd> is not a valid shim` (observed on 2026.10.25) — put it on the inherited `PATH` or make it a mise tool. A remote [`include`](settings.md#remote-config-includes-include) fragment may carry `[wrappers]`; the including file's entry wins. Safe mode ignores project `[wrappers]`. Docs: `https://mise.jdx.dev/dev-tools/shims.html#command-wrappers`.
 
 > 🔴 **`command`, `args`, and `env` are Tera templates (2026.10.13, breaking).** A literal `{{` must be wrapped in `{% raw %}…{% endraw %}`. `command` sees only `vars`, `config_root`, `config_source` (2026.10.14), and the process env.
 

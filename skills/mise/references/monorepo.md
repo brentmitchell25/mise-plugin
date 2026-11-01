@@ -54,7 +54,7 @@ mise install --monorepo node
 mise ls --monorepo
 ```
 
-`[monorepo].config_roots` supports single-level `*` globs only (`**` unsupported) and skips filesystem walking; a glob skips dirs with no mise config, `.mise/tasks/`, or `mise-tasks/`, and absolute paths or paths with `..` are ignored with a warning. **Automatic filesystem discovery is deprecated** — declare `config_roots` explicitly (`mise install --monorepo` and `mise ls --monorepo` **fail** without it). With `lockfile = true` the root holds `mise.lock`, `mise.ci.lock`, and `mise.local.lock`.
+`[monorepo].config_roots` supports single-level `*` globs only (`**` unsupported) and skips filesystem walking; a glob skips dirs with no mise config, `.mise/tasks/`, or `mise-tasks/`, and absolute paths or paths with `..` are ignored with a warning. **Automatic filesystem discovery is deprecated** — declare `config_roots` explicitly (`mise install --monorepo` and `mise ls --monorepo` **fail** without it). With `lockfile = true` the root holds `mise.lock`, `mise.ci.lock`, and `mise.local.lock`. Each declared root loads its full config hierarchy, so a child with no tool overrides keeps the root's tools (2026.10.21); `turbo.json` is parsed as JSONC, so comments are fine (2026.10.24).
 
 Inside a config root, a bare `build` equals `:build` (CLI and `depends`); `:task` resolves against the monorepo root when no config root encloses the cwd. More wildcards: `'//projects/frontend:**'`, `'//...:**'`, `//.../frontend:build`.
 

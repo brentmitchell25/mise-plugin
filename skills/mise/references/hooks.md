@@ -26,7 +26,7 @@
 
 **Working directory (2026.10.19, breaking):** spawned `enter`/`leave` (and `watch_files`) commands run in the **project root**, even when you enter or leave through a subdirectory; `cd` hooks run in the directory the shell moved to; current-shell `script` hooks run in the shell's cwd — refer to project files via `$MISE_PROJECT_ROOT`. Hook commands are Tera templates rendered **once, at load** (`enter = "echo {{config_root}}"`); their output goes to stderr; a failing hook warns and the remaining hooks still run.
 
-**Disable hooks** with `--no-hooks`, `MISE_NO_HOOKS=1`, `no_hooks = true`, or `MISE_SAFE=1` (none affect a tool's own `postinstall` option). Spawned hook commands, task hooks, and watch-file tasks run with `MISE_NO_HOOKS=1` so a nested `mise` doesn't re-run hooks.
+**Disable hooks** with the root-level `--no-hooks` flag (`mise --no-hooks install`, not `mise install --no-hooks`), `MISE_NO_HOOKS=1`, `no_hooks = true`, or `MISE_SAFE=1` (none affect a tool's own `postinstall` option). Spawned hook commands, task hooks, and watch-file tasks run with `MISE_NO_HOOKS=1` so a nested `mise` doesn't re-run hooks.
 
 ### Syntax
 
@@ -125,7 +125,7 @@ All hooks (and watch files) receive:
 `[hooks]` entries additionally receive:
 - `MISE_CONFIG_ROOT` — root of the **config file that defines the hook** (distinct from the project root)
 
-> For a hook in **global** config, both `MISE_PROJECT_ROOT` and `MISE_CONFIG_ROOT` are the global config root, and project hooks don't run.
+> For a hook in **global** config, `MISE_CONFIG_ROOT` is the global config root and `MISE_PROJECT_ROOT` is the **active project's** root (the global root only outside any project). Only global-only operations such as `mise use --global` use the global root for both and skip project hooks.
 
 CD/enter/leave hooks additionally receive:
 - `MISE_PREVIOUS_DIR` — previous directory (only when a directory change occurred)

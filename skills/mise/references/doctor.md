@@ -53,7 +53,8 @@ mise doctor project --json
 - Each command has a deadline and a combined **64 KiB** stdout/stderr cap; output is captured and **discarded** so a probe can't print a credential into the report. Use `description`/`hint` to explain; run the command directly for detail.
 - Templates are **not rendered** in `dir`. Checks that apply to the current platform report errors in safe mode. Empty or fully platform-excluded check lists still succeed.
 - Unknown `[doctor]` container options **warn** (forward compatibility); **unknown check fields are rejected** to catch typos.
-- Statuses: `pass`, `fail`, `error`, `blocked`, `skipped`. Safe mode refuses `[doctor.checks]`.
+- Statuses: `pass`, `fail`, `error`, `blocked`, `skipped`; the report ends with `N passed, M failed, K skipped` (skipped includes blocked) and prints hints as `hint: …` (2026.10.21). Safe mode refuses `[doctor.checks]`.
+- Ordinary `mise doctor` no longer reports uninstalled `lazy = true` tools as problems (it marks them `(lazy)`, 2026.10.21) or tools installed with an explicit backend the registry lists for them (2026.10.20).
 - JSON report has `checks` and `errors` arrays; config-loading errors populate top-level `errors` with `checks` empty.
 
 > Plain `mise doctor` gained checks too: it warns when an installed plugin differs from its `[plugins]` URL/ref (2026.9.15) and when a dotfiles-history watcher is stale or outdated (2026.9.18 / 2026.10.0), with recovery advice.

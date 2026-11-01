@@ -307,6 +307,7 @@ mise vars                       # list vars and where each value comes from ([re
 mise vars prompt [NAME[=VALUE]]…  # ask for every unanswered prompt var (or just those named)
 mise vars git_name=Ada          # save without asking;  `mise vars git_name` prints it
 mise vars ls [--no-header]      # alias: list
+mise vars --json                # 2026.10.22: {"name": "value"} (redacted stay [redacted]); --json-extended adds source; not with NAME
 mise vars unset git_name        # forget a saved answer (aliases rm/remove; edits only the state file)
 mise bootstrap --prompt-vars    # ask during a bootstrap run (e.g. with --adopt)
 ```
@@ -317,7 +318,7 @@ Answers live in `$MISE_STATE_DIR/vars.toml`, keyed by **name only** (shared by e
 
 ### Task-Scoped Secrets (Experimental)
 
-Added **2026.10.4** (docs: `https://mise.jdx.dev/environments/secrets/fnox.html`). mise asks [fnox](https://github.com/jdx/fnox) (≥ 1.39.0, from the project's tools or PATH) for the named keys and gives them **only to the task that lists them** — and programs it starts.
+Added **2026.10.4** (docs: `https://mise.jdx.dev/environments/secrets/fnox.html`). mise asks [fnox](https://github.com/jdx/fnox) (≥ 1.39.0, from the project's tools or PATH; a running fnox daemon is used only from fnox 1.43.0 — older daemons count as not running) for the named keys and gives them **only to the task that lists them** — and programs it starts.
 
 ```toml
 min_version = "2026.10.4"   # older mise rejects `secrets` on a task
@@ -347,7 +348,7 @@ mise secrets ls [-J] [--no-header]          # KEY, ENV, FILE, SCOPES, TASKS, DES
 
 - **Not inherited:** dependencies, `depends_post` tasks, `run = [{ task }]` children, hooks, `skip_if`, `mise env`, the activated shell, shims, and daemons never see them. For `mise run --secrets`, only the tasks named on the command line get them.
 - **`{{ secrets.NAME }}`** is allowed **only** in a task's own `env` (incl. a file task's `#MISE env=` header) — rejected in `run`, `[env]`, `[vars]`, and elsewhere. No filters/other variables; with `env_shell_expand` on, a `$` in the literal text is an error.
-- **Restrictions:** tasks that list secrets always need **trust**; can't come from remote, global, or system config; are refused when launched from hooks, `watch_files`, daemons, or bootstrap; **skip the artifact cache**; always have **redacted output** (`--raw` ignored unless the task sets `raw`/`interactive`). `secrets` is not allowed in `[task_templates]` or `[monorepo.task_defaults]`. A key mise also sets for the task (via `[env]`, task `env`, a tool, or a setting) is an error; a key the task's sandbox would drop is an error (add it to `allow_env`). File tasks use `#MISE secrets=[…]`. Refused in safe mode.
+- **Restrictions:** tasks that list secrets always need **trust**; can't come from remote, global, or system config; are refused when launched from hooks, `watch_files`, daemons, or bootstrap; **skip the artifact cache**; always have **redacted output** (`--raw` ignored unless the task sets `raw`/`interactive`). `secrets` is not allowed in `[task_templates]` or `[monorepo.task_defaults]`. **Personal keys are refused (2026.10.23):** a key from fnox's global config (`~/.config/fnox/config.toml`, where `fnox set --global` writes) or a `fnox.toml` in/above `$HOME` — or a project secret whose value interpolates one — belongs to you, so naming it in a task's `secrets` or `{{ secrets.NAME }}` is an error (`X comes from your own fnox config`); `--secrets-all` omits these keys, while an explicit `mise run --secrets NAME` / `mise x --secrets NAME` still passes them. `mise secrets ls` and `mise tasks validate` report them as kind `personal` (needs an fnox that reports key origin). A key mise also sets for the task (via `[env]`, task `env`, a tool, or a setting) is an error; a key the task's sandbox would drop is an error (add it to `allow_env`). File tasks use `#MISE secrets=[…]`. Refused in safe mode.
 - `[secrets.fnox]` merges per field (nearest project file wins, so `mise.<env>.toml` can switch `profile`); it is **ignored** in global/system config and files in or above `$HOME` (`mise doctor` reports it). In CI or without a TTY mise runs `fnox --non-interactive --no-daemon`; it reads a running fnox daemon's cache but never starts one. `mise x` can't grant file (`as_file`) secrets and its output is never redacted.
 - **Migration:** the `mise-env-fnox` plugin and `_.fnox-env` directive are deprecated (`mise doctor` flags them) — move to `[secrets.fnox]` + per-task `secrets`. Check config with `mise tasks validate`.
 - 🔴 **`mise secrets` is now a built-in command** — a task named `secrets` must be run as `mise run secrets`. Likewise `installs` (10.4), `vars` (10.6), and `lsp` (10.18).

@@ -89,7 +89,7 @@ If `task_config.includes` is set, it **replaces** these defaults — list them e
 
 **Task names from file names (2026.10.5):** extension stripping applies **only to file tasks** and only for known script extensions (`bash bat cjs cmd com exe fish js ksh lua mjs mts nu php pl ps1 py rb sh ts vbs zsh` plus `windows_executable_extensions`). So `mise-tasks/gen.proto` stays `gen.proto`, TOML tasks `[tasks."test.unit"]`/`[tasks."test.e2e"]` keep their full names, `MISE_TASK_NAME` is the listed name (`build`, not `build.sh`), and both `db:migrate` and `db:migrate.sh` run the task.
 
-**`#MISE` headers accept every task property except `run`, `run_windows`, `file`, and `usage`** (2026.10.14 — verified on 2026.10.19: `#MISE timeout="1s"` kills the script, `#MISE vars=…`, `skip_if`, `confirm`, and `allow_env` all work). Those four warn ``mise WARN `run` has no effect in a task file header, ignoring``. A value of the wrong type warns and skips **only that key**; a bad `confirm` or `deny_*` value is a **hard error** (fails closed). A header `silent` counts as explicitly set, so an `extends` template no longer overrides it. Prefix a line with `# NOMISE` to disable it; `# MISE` (with a space) also works.
+**`#MISE` headers accept every task property except `run`, `run_windows`, `file`, and `usage`** (2026.10.14 — verified on 2026.10.25: `#MISE timeout="1s"` kills the script, `#MISE vars=…`, `skip_if`, `confirm`, and `allow_env` all work). Those four warn ``mise WARN `run` has no effect in a task file header, ignoring``. A value of the wrong type warns and skips **only that key**; a bad `confirm` or `deny_*` value is a **hard error** (fails closed) — and it breaks the whole project, not just that task: every `mise run`, `mise tasks ls`, and `mise tasks info` there fails until it is fixed. A header `silent` counts as explicitly set, so an `extends` template no longer overrides it. Prefix a line with `# NOMISE` to disable it; `# MISE` (with a space) also works.
 **Supported `#USAGE` directives:** `arg`, `flag`, `choices`, `complete`, `env`, and root-level `mount`.
 
 > Before **2026.10.14**, `timeout`, `vars`, and the `deny_*`/`allow_*` sandbox fields were rejected in headers (`WARN unknown field(s) … ignoring`). If a project must support older mise, keep them in a metadata-only TOML block (see [Configuring File Tasks from TOML](#configuring-file-tasks-from-toml)).
@@ -130,7 +130,7 @@ If `task_config.includes` is set, it **replaces** these defaults — list them e
 #MISE description="Hello from PowerShell"
 ```
 
-> Header lines are recognized by the regex `^(?:#|//|::)\s*(?:(USAGE|MISE)|\[(USAGE|MISE)\])(.*)$`. An executable file **without a shebang** still has its `#MISE`/`#USAGE` lines parsed (a UTF-8 BOM is stripped first). Blank comment lines continue the block; the **first non-comment line ends it** — later `#USAGE` lines are ignored. File-task `#USAGE` lines are **not** Tera-rendered (TOML `usage` strings are — see [Tera in TOML usage](usage-spec.md#tera-rendering-of-toml-usage-strings)).
+> Header lines are recognized by the regex `^(?:#|//|::)\s*(?:(USAGE|MISE)|\[(USAGE|MISE)\])(.*)$`. An executable file **without a shebang** still has its `#MISE`/`#USAGE` lines parsed (a UTF-8 BOM is stripped first). The `#USAGE` block starts at the **first `#USAGE` line, wherever it is** (code before it doesn't end anything); blank comment lines continue it, and the first non-comment line **after it starts** ends it — later `#USAGE` lines are ignored. `#MISE` lines are read from anywhere in the file. File-task `#USAGE` lines are **not** Tera-rendered (TOML `usage` strings are — see [Tera in TOML usage](usage-spec.md#tera-rendering-of-toml-usage-strings)).
 
 **Root-level `mount`** (mise 2026.7.0+) hoists a spec produced by another command onto the task:
 ```bash
@@ -139,14 +139,14 @@ If `task_config.includes` is set, it **replaces** these defaults — list them e
 #USAGE mount "mise run run-release -- --usage-spec"
 ```
 
-> **File tasks only.** mise hoists root-level `mount` nodes into a synthetic command, and that hoisting runs only for file-task headers. A root-level `mount` inside a TOML `usage = '''…'''` field fails with `Invalid usage config` — put it inside a `cmd` block there. Mounts resolve at **completion** time, not on `--help`.
+> **File tasks only.** mise hoists root-level `mount` nodes into a synthetic command, and that hoisting runs only for file-task headers. A root-level `mount` inside a TOML `usage = '''…'''` field loads and passes `mise tasks validate`, but is **ignored at run time** (its flags become positionals) — put it inside a `cmd` block there. Mounts resolve at **completion** time, not on `--help`.
 
 **Direct script execution** bypasses discovery (path must start with `/`, `./`, `../`, `C:\`, `.\`, or `..\`):
 ```bash
 mise run ./path/to/script.sh
 ```
 
-Since **2026.10.5** a relative path resolves from the **current directory** (not the project root); the script still runs in the config root. In a terminal mise offers to `chmod +x` a non-executable file; otherwise it errors with `` `./build.sh` is not executable. Run: chmod +x ./build.sh ``.
+Since **2026.10.5** a relative path resolves from the **current directory** (not the project root); the script still runs in the config root. In a terminal mise offers to `chmod +x` a non-executable file; otherwise it errors with `` `<resolved path>/build.sh` is not executable. Run: chmod +x <resolved path>/build.sh ``.
 
 > **Windows file tasks:** a `#!/usr/bin/env pwsh` file without `.ps1` runs from a temporary `.ps1` copy, so `$PSScriptRoot` points at the copy — use `$env:MISE_TASK_DIR`. With both `build.ps1` and `build.cmd`, all are kept as tasks; run one by its full name.
 

@@ -71,7 +71,7 @@ run = 'echo {{arg(name="x")}}'
 
 ## Overview
 
-> **Verified against mise 2026.10.19** (released 2026-10-24) and **usage-lib 7.1.1** (the version that mise bundles; latest usage is 7.1.2), using the live binary (`mise settings`, `mise --help`, `mise backends ls`, real `mise run` probes), the published JSON schema (`https://mise.jdx.dev/schema/mise.json`), the docs source at the `v2026.10.19` tag, mise's Rust source for deprecation dates, and the `jdx/mise` release notes for every release from 2026.10.4 to 2026.10.19. Where docs and release notes disagree, release notes win; where both disagree with the binary, the binary wins.
+> **Verified against mise 2026.10.25** (released 2026-10-31) and **usage-lib 7.1.4** (the version that mise bundles; usage 7.1.5 is not in a mise release yet), using the live binary (`mise settings`, `mise --help`, `mise backends ls`, real `mise run` probes), the published JSON schema (`https://mise.jdx.dev/schema/mise.json`), the docs source at the `v2026.10.25` tag, mise's Rust source for deprecation dates, and the `jdx/mise` release notes for every release from 2026.10.4 to 2026.10.25. Where docs and release notes disagree, release notes win; where both disagree with the binary, the binary wins.
 
 mise is an all-in-one developer environment tool that manages:
 
@@ -79,7 +79,7 @@ mise is an all-in-one developer environment tool that manages:
 - **Tasks** — project-specific commands with argument handling, dependencies, freshness checks, and output caching
 - **Environments** — manage env vars, configuration environments, dotenv files (with `find_up`), per-machine `[vars]` prompts, age/sops-encrypted values, and task-scoped fnox secrets
 - **Hooks** — run commands on directory changes, project enter/leave, tool install
-- **Daemons** — long-lived project services (databases, brokers, dev servers) supervised by pitchfork, startable as a task prerequisite
+- **Daemons** — long-lived project services (databases, brokers, dev servers, Docker/Podman containers) supervised by pitchfork, startable as a task prerequisite
 - **Diagnostics** — project-defined `mise doctor project` checks for requirements tool versions can't express
 - **Wrappers** — intercept a command name before it reaches the active toolset
 - **Sandboxing** — restrict a task's filesystem/network/env access; `safe` mode for untrusted configs
@@ -160,7 +160,8 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Use `confirm` for destructive operations
 - Use literal `choices` for stable enums, `choices run="cmd"` / `choices env="VAR"` for derivable closed sets (they **validate**), and `complete` only for open-ended or cascading values
 - Use `validate=` + `validate_error=` for format/range checks (ports, names) — it works in mise and rejects bad input before dependencies run
-- Nest `complete` inside its `arg` (`arg "<svc>" { complete run="…" }`) — a top-level `complete "plugin"`/`"task"`/`"tool"`… is shadowed by mise's own completers
+- Nest `complete` inside its `arg` (`arg "<svc>" { complete run="…" }`) — it keeps the completer beside its arg and wins over a same-named top-level `complete`
+- Give a relationship several targets with the child-node form — `flag "--a" { conflicts "--b" "--c" }`, never `conflicts="--b --c"`
 - Wrap usage-time templates in TOML `usage` strings with `{% raw %}…{% endraw %}` (`{{ words[PREV] }}`), and branch on `$usage_cmd` for subcommands
 - Run `mise tasks validate` in CI — one broken spec silently breaks tab-completion for every task (it also flags `secrets` without `[secrets.fnox]`, secret/sandbox/env conflicts, and missing `daemons`; it does **not** catch `clause` or inline `choices`)
 - Group related tasks with namespaces (e.g., `test:unit`, `test:e2e`)
@@ -213,7 +214,16 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Keep global CLIs current with `auto_update` / `tool_update.global_auto` in **global** config (never in a project)
 - In CI, cache `~/.cache/mise/downloads-cas` (verified) rather than installed tools, and `mise lock --platform …` every CI platform
 - Use `[doctor.checks.*] depends` to order diagnostics so dependent checks report `blocked` instead of noisy failures
-- Run tasks named `lsp`, `vars`, `secrets`, or `installs` with `mise run <name>` — the bare form now hits built-in commands
+- Run tasks named `lsp`, `vars`, `secrets`, or `installs` with `mise run <name>` — the bare form now hits built-in commands (likewise `mise tasks set`/`rm`/`remove` are now subcommands)
+- Script task edits with `mise tasks add --force`, `mise tasks set`, and `mise tasks rm --yes` (preview with `--dry-run --json`); `--env local` keeps a personal task in `mise.local.toml`
+- Block until a file changes with `mise watch <task> --once` (exits with the task's status) instead of a sleep/poll loop
+- Add personal bin dirs with `_.path = { path = ["~/bin"], position = "append" }` so they can't shadow mise-managed tools
+- Use `--no-global` (or `--project`) on `ls`, `outdated`, `upgrade`, and `tasks ls` to leave out global config
+- Write `mise use <tool>@latest` to install the newest release — a bare `mise use <tool>` reuses the newest installed version
+- Anchor `version_regex` (`'^v\d+\.\d+\.\d+$'`) on github/gitlab/forgejo tools — it matches anywhere in the raw tag
+- Set `registry_index = "priority"` on `pypi:` tools whose `registry_url` index hosts only your own packages
+- Behind a TLS-inspecting proxy, set `extra_ca_certs` (global config or `MISE_EXTRA_CA_CERTS`) instead of replacing `SSL_CERT_FILE`
+- Run databases and brokers as container daemons (`image = "postgres:18"`, `data_mount`, `proxy = false`) when you'd rather not install them as tools
 
 ### DON'T ❌
 
@@ -229,7 +239,8 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Use the `slice` filter in completion templates — it isn't available, and the arg silently falls back to file completion
 - Assume the old usage 4.x limits still apply — `flag { alias }`, `required_if`, `required_unless`, `overrides`, `conflicts`, and `requires` all work under v6, and `double_dash="required"` is now enforced
 - Expect `arg "<start> <end>"` fixed arity to produce two env vars — both values land in the first
-- Put a root-level `mount` in a TOML `usage` field — it no longer errors, but it is ignored at run time (file-task headers only)
+- Write a `usage` spec that is only a `mount` — with no `arg`, `flag`, or `cmd`, mise ignores the spec at run time (TOML and file tasks); add an arg/flag or put the mount in a `cmd`
+- Give a relationship property several targets (`conflicts="--b --c"`) or repeat it — mise 2026.10.25 silently mis-enforces it and usage 7.1.5 rejects it; use the child-node form
 - Put `run`, `run_windows`, `file`, or `usage` in a `#MISE` header — they are ignored with a warning (use `#USAGE` lines for args)
 - Put `redactions` inside `[tasks.x]` — it's a top-level key only; in a task it is a parse error
 - Assume `sources` freshness ignores gitignored files — it doesn't (only `mise watch` does)
@@ -249,7 +260,7 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Use `mise use -E staging` to write `mise.staging.toml` — the global `-E` only selects the load env; use `mise use -e staging`
 - Use `[[oci.copy]] source/dest` — the keys are `host`/`image`
 - Use `[bootstrap.compose.*] path =` — Compose needs `project_dir` (absolute) + `files`
-- Use inline tool options (`"tool[opt=…]"`) in shared configs expecting them to load untrusted — since 2026.9.18 they require `mise trust`
+- Use tool options — inline (`"tool[opt=…]"`) or a tool table with any option — in shared configs expecting them to load untrusted; they require `mise trust`
 - Compute a version alias by running the same tool (`exec(command='node --version')`)
 - Use `MISE_RAW=1` without knowing it sets `MISE_JOBS=1`
 - Install new `asdf:` or `vfox:` plugins when aqua/github alternatives exist
@@ -278,11 +289,19 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Put secrets in task `env`, `cache.env`/`global_env` values, `vars`, or `command_inputs` when a remote task cache is configured — the action description is uploaded verbatim (use `pass_through_env`)
 - Set `PATH` in `[env]` — it's ignored; use `_.path`
 - Name a structured env file `.env.yml` — only `.json`/`.yaml`/`.toml` are structured; `.yml` is parsed as dotenv
-- Use `state = "absent"` on `apt:`/`brew:`/… packages — only pacman, scoop, snap, and zypper remove
+- Use `state = "absent"` on `apt:`/`brew:`/`choco:`/… packages — only pacman, scoop, snap, zypper (and dnf on rpm-ostree with `ostree = "layer"`) remove
 - Put `encrypt = true` on symlink/copy/template dotfile entries — it applies to `mode = "track"` only
 - Use the old `auto_update`/`auto_update_check_duration` settings — they're `self_update.auto`/`self_update.check_duration` now (the per-tool `auto_update` option is a different feature)
 - Rely on a `.config/mise.toml`-relative `exec()`/`read_file()` resolving from the project root — they run in the config file's directory
 - Assume a hook's `mise run`, a shim, `--help`, or an MCP call will trust a project for you (2026.10.19)
+- Set `lockfile_mode = "merge"` — deprecated (warns from 2027.4.0, removed 2027.10.0); delete the line
+- Set `system_packages.elevate_with`, `extra_ca_certs`, or `ruby.apply_patches` in a project `mise.toml` — they are global-only and ignored with a warning
+- Expect a project task to receive a key from your **personal** fnox config (`~/.config/fnox/config.toml`, or a `fnox.toml` in/above `$HOME`) — it's refused; define it in the project's `fnox.toml` or pass `--secrets NAME`
+- Use `--local` / `-l` on `ls`, `outdated`, `upgrade`, or `tasks ls` — deprecated in favor of `--no-global` (removed 2027.7.0)
+- Re-run `mise tasks add` on an existing name without `--force` — replacing a different task that way is deprecated (refused from 2028.5.0)
+- Confuse `mise tasks add -e/--env <ENV>` (writes `mise.<ENV>.toml`, loaded only with `MISE_ENV`) with `--env-var KEY=VALUE` (the task's `env`)
+- Mix `env`/`vars` and `version` in one tool-option Tera expression (`{{ env.D ~ version }}`) — it renders at install time with `env`/`vars` empty; use separate `{{ }}` blocks
+- Expect project `[env]` values inside a container daemon — only the daemon's own `env` table is passed in
 
 ### Complete Task Example
 

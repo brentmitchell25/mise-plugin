@@ -18,13 +18,13 @@
 
 The `usage` field uses [KDL-inspired syntax](https://usage.jdx.dev/) to define arguments, flags, and completions.
 
-> 🔴 **Version context (verified 2026-10-25).** mise 2026.10.19 bundles **usage-lib 7.1.1** (2026.10.4 → 6.12.1, 2026.10.6 → 7.0.0, 2026.10.12 → 7.0.1, 2026.10.13 → 7.0.2, 2026.10.16 → 7.1.0, 2026.10.18+ → 7.1.1; mise's own CLI spec still declares `min_usage_version "6.11"`). **The usage 6 → 7 major bump changes nothing a mise task author writes** — its breaking changes (derive macros no longer read `Cargo.toml`, `usage generate fig` removed, `usage-argv` internals) are Rust-library/CLI concerns; no spec syntax was added, removed, or renamed. In **2026.8.11** mise migrated its *own* CLI parser, help output, and shell completions from clap to usage-rs.
+> 🔴 **Version context (verified 2026-11-01).** mise 2026.10.25 bundles **usage-lib 7.1.4** (2026.10.4 → 6.12.1, 2026.10.6 → 7.0.0, 2026.10.12 → 7.0.1, 2026.10.13 → 7.0.2, 2026.10.16 → 7.1.0, 2026.10.18 → 7.1.1, 2026.10.20 → 7.1.2, 2026.10.21 → 7.1.3, 2026.10.25 → 7.1.4; usage 7.1.5 is not in any mise release yet; mise's own CLI spec still declares `min_usage_version "6.11"`). **The usage 6 → 7 major bump changes nothing a mise task author writes** — its breaking changes (derive macros no longer read `Cargo.toml`, `usage generate fig` removed, `usage-argv` internals) are Rust-library/CLI concerns; no spec syntax was added, removed, or renamed. In **2026.8.11** mise migrated its *own* CLI parser, help output, and shell completions from clap to usage-rs.
 >
 > **Nothing is compiled out.** Since **2026.8.13** mise depends on `usage-cli`, whose manifest enables usage-lib's `validation` and `unstable_choices_env` features; Cargo unifies features across the build, so mise's single usage-lib gets them. `validate=` and `choices env=` **work and are enforced** (see [Validation and Env-Backed Choices](#validation-and-env-backed-choices)).
 >
-> **usage 6.11–6.12 change how specs are written:** `choices run="cmd"` (command-backed choices that validate), `complete` nested inside an `arg`/`flag`, `complete … delegate="tool"`, `$usage_cmd` for the chosen subcommand, `default_subcommand_on_empty`, and `logo`. All re-verified on mise 2026.10.19 below.
+> **usage 6.11–6.12 change how specs are written:** `choices run="cmd"` (command-backed choices that validate), `complete` nested inside an `arg`/`flag`, `complete … delegate="tool"`, `$usage_cmd` for the chosen subcommand, `default_subcommand_on_empty`, and `logo`. All re-verified on mise 2026.10.25 below.
 >
-> 🔴 **`choices` MUST go in a child block — the inline form is silently ignored.** `arg "<env>" choices "dev" "prod"` parses (KDL reads the bare `choices` as just another positional string) but **validates nothing**: `mise run t bogus` runs with `usage_env=bogus`, `--help` lists no possible values, and `mise tasks validate` passes. Always write `arg "<env>" { choices "dev" "prod" }` — then `bogus` is rejected with `Invalid choice for arg env: bogus, expected one of dev, prod`. (Verified on 2026.10.19.)
+> 🔴 **`choices` MUST go in a child block — the inline form is silently ignored.** `arg "<env>" choices "dev" "prod"` parses (KDL reads the bare `choices` as just another positional string) but **validates nothing**: `mise run t bogus` runs with `usage_env=bogus`, `--help` lists no possible values, and `mise tasks validate` passes. Always write `arg "<env>" { choices "dev" "prod" }` — then `bogus` is rejected with `Invalid choice for arg env: bogus, expected one of dev, prod`. (Verified on 2026.10.25.)
 >
 > 🔒 **Dynamic completion needs trust (2026.10.19).** `complete run=`, `complete delegate=`, `choices run=`, and `mount` run **only for trusted configs**; untrusted projects fall back to file completion (static `choices`, task names, and help still complete). Safe mode keeps them off even when trusted. A project with only a `mise-tasks/` directory needs `mise trust .`. Candidates containing control characters are dropped, and all candidates are treated as **plain text** (never shell-evaluated).
 >
@@ -60,7 +60,7 @@ Every attribute is accepted both as a prop (`arg "<f>" key=value`) and as a chil
 | `hide_default_value`, `hide_env`, `hide_env_values`, `hide_possible_values`, `hide_short_help`, `hide_long_help` | boolean | `#false` | **v6.** Presentation-only; defaults, env fallback, and validation stay active |
 | `value_names` | child node | none | **v6.** Relabel values / declare fixed arity |
 | `env_fallback` | child node | none | **v6.** Additional env vars in precedence order |
-| `deprecated_env` | child node | none | **v6.** Compatibility env aliases, consulted last, reported as deprecated |
+| `deprecated_env` | child node | none | **v6.** Compatibility env aliases, consulted last (mise prints no deprecation warning for them) |
 | `note` / `warning` | child node | none | **v6.** Semantic callouts in long help and generated Markdown |
 
 **Shorthands:** `<f>` required · `[f]` optional · `<f>...` ⇒ `var=#true` · `<-- f>` / `[-- f]` ⇒ `double_dash="required"`.
@@ -73,6 +73,8 @@ arg "[request]" { requires "--mode" "--scope" }
 arg "[token]"   { required_if_eq "--mode" "remote" }
 arg "[sum]"     { required_unless_all "--stdin" "--file" }
 ```
+
+> 🔴 **One target per property; several targets → child node.** `flag "--a" conflicts="--b --c"` (a property naming several targets) or a repeated property (`conflicts="--b" conflicts="--c"`) passes `mise tasks validate` on mise 2026.10.25 (usage-lib 7.1.4) but misbehaves: multi-target `conflicts` enforces nothing, a repeated one enforces only the last, and multi-target `requires`/`required_unless` can never be satisfied. usage 7.1.5 makes both forms load-time errors. Write `flag "--a" { conflicts "--b" "--c" }` — correct on every version. Applies to `conflicts`, `overrides`, `requires`, `required_if`, `required_unless`, `required_unless_all`.
 
 **Environment precedence:** CLI argv → `env` → `env_fallback` (left to right) → `deprecated_env` → `default`.
 
@@ -92,7 +94,7 @@ arg "<port>" validate="int(value) >= 1 && int(value) <= 65535" validate_error="m
 
 #### Dynamic Choices (`env=` and `run=`)
 
-Both forms **validate** (unlike `complete`, which only suggests) and both feed tab-completion. Verified on mise 2026.10.3:
+Both forms **validate** (unlike `complete`, which only suggests) and both feed tab-completion. Verified on mise 2026.10.25:
 
 ```
 arg "<env>" { choices env="DEPLOY_ENVS" }                    # DEPLOY_ENVS="dev,staging prod"
@@ -106,12 +108,12 @@ flag "--svc <svc>" { choices run="printf 'app\ndb\n'" }      # also on a flag's 
 | `choices env=` — value not in the list | `Invalid choice for arg env: qa, expected one of dev, staging, prod` |
 | `choices env=` — var unset | `Invalid choice for arg env: dev, no choices resolved from env DEPLOY_ENVS` |
 | `choices run=` — value not in output | `Invalid choice for arg svc: nope, expected one of all, app, db` |
-| `choices run=` — command fails | `Could not check arg svc: x against its choices: exited with code 3` (task fails) |
+| `choices run=` — command fails | `Could not check arg svc: x against its choices: exited with code 3`, then the command (`sh -c exit 3`) on a second line (task fails) |
 | `--help` | does **not** run the command; prints ``[possible values: output of `ls services`]`` (with a literal value alongside, two lines: `[possible values: all]` and the `output of` line) |
 
 > Prefer `choices run=` over `complete run=` whenever the set is derivable *and* invalid values should be rejected. Inside a TOML `usage` string, any `{{ }}` in the command must be `{% raw %}`-wrapped.
 
-> ✅ **`double_dash="required"` is now enforced** (usage v6). A value offered before `--` errors with ``Argument <args> can only be set after a `--` separator``. Specs that "happened to work" under the old unenforced behavior will now error — re-verified on mise 2026.10.19.
+> ✅ **`double_dash="required"` is now enforced** (usage v6). A value offered before `--` errors with ``Argument <args> can only be set after a `--` separator``. Specs that "happened to work" under the old unenforced behavior will now error — re-verified on mise 2026.10.25.
 
 **Variadic args in bash:**
 ```bash
@@ -149,7 +151,7 @@ done
 | `alias` | child node | none | **v6 — now works.** Short/extra form: `flag "--user" { alias "-u" }`; supports `hide=#true` |
 | `required_if` / `required_unless` | string | none | **v6 — now works and is enforced** |
 | `required_if_eq` / `required_if_eq_all` / `required_unless_all` | child node | none | **v6.** Value-conditional requirements |
-| `conflicts` / `requires` / `requires_if` | string \| child node | none | **v6.** Mutual exclusion / co-requirements |
+| `conflicts` / `requires` / `requires_if` | string \| child node | none | **v6.** Mutual exclusion / co-requirements. A string names **one** target — use the child node for several (see the relationship note above) |
 | `overrides` | string | none | **v6.** Two flags override each other; last one wins |
 | `exclusive` | boolean | `#false` | **v6.** Flag must be given on its own |
 | `require_equals` | boolean | `#false` | **v6.** `--inspect=9229` accepted, `--inspect 9229` rejected |
@@ -162,7 +164,7 @@ done
 | `value_terminator` | string | none | **v6.** Token ending one variadic occurrence |
 | `display_order` | integer | none | **v6.** Explicit order within its help section |
 | `help_heading` | string | none | **v6.** Group this flag under a heading in help |
-| `action` | enum | none | **v6.** `help` \| `help_short` \| `help_long` \| `help_all` \| `version`; pair with `builtin=#true` for parser-supplied flags |
+| `action` | enum | none | **v6.** `help` \| `help_short` \| `help_long` \| `help_all` \| `version`. In mise tasks every `help*` action (with or without `builtin=#true`) prints help through `mise ERROR`, exit 1 — rely on the built-in `-h`/`--help` |
 | `env_fallback` / `deprecated_env` | child node | none | **v6.** Extra / legacy env sources |
 | `note` / `warning` | child node | none | **v6.** Semantic callouts |
 | `hide_default_value`, `hide_env`, `hide_env_values`, `hide_possible_values`, `hide_short_help`, `hide_long_help` | boolean | `#false` | **v6.** Presentation-only |
@@ -188,11 +190,11 @@ flag "--clear" effect="destructive" help="Delete stored logs"
 
 **Count flags:** `-vvv` sets `$usage_verbose` to `3`. Short flags chain: `-abc` = `-a -b -c`.
 
-> ⚠️ **Never put `default` on a `count` flag.** A bare integer (`default 0`) fails to parse (`expected string`), and `default="0"` is coerced through the boolean path, yielding `usage_verbose=false` when the flag is absent. Use `${usage_verbose:-0}` in the script instead. (Still broken on 2026.10.19.)
+> ⚠️ **Never put `default` on a `count` flag.** A bare integer (`default 0`) fails to parse (`expected string`), and `default="0"` is coerced through the boolean path, yielding `usage_verbose=false` when the flag is absent. Use `${usage_verbose:-0}` in the script instead. (Still broken on 2026.10.25.)
 
 **Negate flags:** `flag "--color" negate="--no-color" default=#true` — `--no-color` sets `$usage_color` to `false`. Help renders these as `--color / --no-color`.
 
-**v6 examples (all re-verified working in mise 2026.10.19):**
+**v6 examples (all re-verified working in mise 2026.10.25):**
 
 ```
 flag "--user" { alias "-u" }                      # short form as a child node
@@ -220,7 +222,7 @@ complete "<arg_name>" delegate="git --no-pager"  # fixed leading args are allowe
 | Attribute | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `run` | string (Tera) | none | Shell command; one candidate per line |
-| `type` | string | none | Built-in completer (all verified on 2026.10.19) — see table below |
+| `type` | string | none | Built-in completer (all verified on 2026.10.25) — see table below |
 | `delegate` | string | none | **6.12.** Complete the remaining words with *that* command's own shell completion; may carry fixed args (`"git --no-pager"`). zsh and bash verified; the delegated shell gets **3 s** to answer; the wrapped tool's completion must be in bash-completion's loader dir (zsh: default `fpath`) — `.bashrc`/`.zshrc` setup isn't seen. PowerShell/Nushell unsupported. With `double_dash="automatic"` every word after the first passes straight through. Completion-only — the task runs normally. |
 | `descriptions` | boolean | `#false` | Parse `value:description` output |
 
@@ -233,18 +235,18 @@ complete "<arg_name>" delegate="git --no-pager"  # fixed leading args are allowe
 | `executable` | Executables plus directories |
 | `command_args` | A command first, then paths |
 | `hostname` | Hosts from the environment and `/etc/hosts` |
-| `username` | Users from `/etc/passwd` |
+| `username` | Users from `/etc/passwd` (on macOS the file's `#` comment lines also appear until you type a prefix) |
 | `url`, `email` | No candidates; file fallback suppressed |
 | `none` | No candidates; no file fallback |
 | `unknown` | No candidates; file fallback kept |
-| `config_keys`, `config_values` | **No candidates in mise tasks — don't use** |
+| `config_keys`, `config_values` | `config_keys` gives no candidates in mise tasks; `config_values` falls back to files — don't use either |
 
 Short flags show their help in completion menus (usage 7.0.2: `-v  Verbose output` in zsh/fish).
 
 `run`, `type`, and `delegate` are **mutually exclusive** — combining them errors with `can set only one of run, type or delegate`.
 
-**Key rules (verified on mise 2026.10.19):**
-- **Nest `complete` inside the `arg` in mise tasks.** mise mounts every task as a `cmd` under `run`, so a *top-level* `complete "<name>"` is looked up after **mise's own root completers** — and loses to them for these names: `plugin`, `task`, `tool`, `dir`, `alias`, `setting`, `env_var`, `env_key`, `backend`, `bin_name`, `prefix`, `config_file`, `new_plugin`, `installed_tool`, `tool@version`, `installed_tool@version`. E.g. `arg "<plugin>"` + `complete "plugin" run=…` completes mise's plugin list, not yours. A nested `complete` (or a different arg name) avoids this. (usage **7.1.2** stops mounted commands inheriting top-level completers, but mise 2026.10.19 bundles 7.1.1 — the shadowing still happens.)
+**Key rules (verified on mise 2026.10.25):**
+- **Nest `complete` inside the `arg` in mise tasks.** A nested `complete` always wins over a same-named top-level one and keeps the completer next to its arg. Since mise 2026.10.20 (usage 7.1.2) a top-level `complete "<name>"` is no longer shadowed by mise's own root completers — but an arg named like one of them (`arg "<plugin>"`, `arg "<tool>"`) with **no** completer now falls back to file completion rather than mise's plugin/tool list.
 - A top-level `complete` may now appear before or after its `arg`; the node name is lowercased and must match the arg name.
 - **`usage_*` variables are NOT set during completion** — `${usage_service}` in a `complete run=` is empty. Read earlier words with `{{ words[PREV] }}` instead.
 - When no completer is given, the arg's own name is used as the type: `arg "<file>"`, `<dir>`, `<path>`, `<command>`, `<executable>`, `<hostname>`, `<username>` complete with no block.
@@ -301,9 +303,9 @@ Execution: `sh -c` (`cmd /c` on Windows when `sh` is absent), stdin closed, `__U
 
 #### Tera Rendering of TOML `usage` Strings
 
-mise renders a TOML task's `usage` string with **its own Tera context** (`config_root`, `cwd`, `env`, `vars`, `tools`, `mise_bin`, `xdg_*` …) **before** usage parses it. Consequences, verified on 2026.10.3:
+mise renders a TOML task's `usage` string with **its own Tera context** (`config_root`, `cwd`, `env`, `vars`, `tools`, `mise_bin`, `xdg_*` …) **before** usage parses it. Consequences, verified on 2026.10.25:
 
-- `{{ words[PREV] }}` / `{{ usage }}` meant for usage fail at **task load** — `ERROR Failed to render task usage … Cannot index into an undefined value` — breaking `mise run <task>`, its `--help`, **and completion for every other task**.
+- `{{ words[PREV] }}` / `{{ usage }}` meant for usage fail when the task is parsed — `[bad] ERROR Failed to render task usage … Cannot index into an undefined value` — breaking `mise run <task>`, its `--help`, **and completion for every other task** (other tasks still run; `mise tasks validate` catches it).
 - Fix: wrap usage-time templates in `{% raw %}…{% endraw %}`.
 - Upside: mise values work in defaults — `arg "[dir]" default="{{ config_root }}/sub"`, `flag "--home <h>" default="{{ env.HOME }}"`.
 - File-task `#USAGE` lines are **not** rendered by mise; write `{{ words[PREV] }}` directly there.
@@ -355,7 +357,7 @@ esac
 
 **Critical distinction:** absent means **UNSET**, not empty string. `default=""` makes the variable SET to an empty string.
 
-> 🔴 **Test boolean flags against `"true"`: `[ "${usage_x:-false}" = "true" ]`.** A `[ -n "${usage_x:-}" ]` test (or `${usage_x:+…}`) treats the string `"false"` as ON — wrong whenever the flag has `default=#false`, a `negate` form, or an env backing (verified on 2026.10.19; mise's own task-arguments doc now says the same). `-n` is only safe for value args/flags.
+> 🔴 **Test boolean flags against `"true"`: `[ "${usage_x:-false}" = "true" ]`.** A `[ -n "${usage_x:-}" ]` test (or `${usage_x:+…}`) treats the string `"false"` as ON — wrong whenever the flag has `default=#false`, a `negate` form, or an env backing (verified on 2026.10.25; mise's own task-arguments doc now says the same). `-n` is only safe for value args/flags.
 
 ```bash
 # Required arg — error if not provided
@@ -442,9 +444,9 @@ cmd "production" effect="destructive" help="Deploy to production" {
 | `example "code"` | child node | **Exactly one** positional arg; use `header=` / `help=` / `lang=` props |
 | `mount run="<cmd>"` | child node | Dynamic subcommand mounting; `run` is required. **Inside a `cmd` in a TOML `usage` it works at run time** (`usage_cmd="run inner"`, mounted args parsed); `synopsis="[TASK] [ARGS]…"` shows in that cmd's help |
 | `disable_help_subcommand` | boolean | Every task with `cmd` children lists a fake `help` subcommand (`mise run t help` → `unexpected word: help`); set `#true` to remove it |
-| `subcommand_help_heading`, `subcommand_value_name`, `next_line_help`, `term_width`/`max_term_width`, `display_order`, `help_heading`, `disable_version_flag`, `args_conflicts_with_subcommands` | various | All verified working on 2026.10.19 (`args_conflicts_with_subcommands` → `subcommand 'sub' cannot be used with arguments on its parent command`). `disable_help_flag` hides the `-h` row but mise still prints help on `--help` |
-| `subcommand_precedence_over_arg` | boolean | Works for variadic **flags** (`--items a b done` ⇒ `cmd=done`), **not** for variadic positionals |
-| `surface`, `available_if`, `view`, `about_md` | — | Metadata only — no effect in mise |
+| `subcommand_help_heading`, `subcommand_value_name`, `next_line_help`, `term_width`/`max_term_width`, `display_order`, `help_heading`, `disable_version_flag`, `args_conflicts_with_subcommands` | various | All verified working on 2026.10.25. `display_order` orders whole help **sections** (2026.10.21, usage 7.1.3): each section sits at the lowest `display_order` of its commands, and a command without one counts as 999 (`args_conflicts_with_subcommands` → `subcommand 'sub' cannot be used with arguments on its parent command`). `disable_help_flag` hides the `-h` row but mise still prints help on `--help` |
+| `subcommand_precedence_over_arg` | boolean | Works for a **multi-value** flag `flag "--items <i>..."` (`--items a b done` ⇒ `cmd=done`), **not** for a repeatable `var=#true` flag (`unexpected word: b`) or variadic positionals |
+| `surface`, `available_if` | — | Metadata only — no effect in mise. (`view` and `about_md` are **top-level** nodes, not `cmd` attributes: `cmd "a" view="z"` is a hard error `unsupported cmd prop view`; at the top level they parse and do nothing) |
 
 ```
 example "mycli list --all" header="Basic usage" help="Lists everything"
@@ -536,7 +538,7 @@ config {
 
 ### Validation and Env-Backed Choices
 
-`validate=` and `choices env=` work and are enforced on mise 2026.8.13 and later — mise depends on `usage-cli`, whose manifest turns on usage-lib's `validation` and `unstable_choices_env` features. Verified on 2026.10.19:
+`validate=` and `choices env=` work and are enforced on mise 2026.8.13 and later — mise depends on `usage-cli`, whose manifest turns on usage-lib's `validation` and `unstable_choices_env` features. Verified on 2026.10.25:
 
 | Syntax | Valid value | Invalid value |
 |--------|-------------|---------------|
@@ -548,7 +550,7 @@ A `validate` rule runs **after defaults and env fallbacks are applied** — it i
 
 ### Still Not Implemented (do not use)
 
-These appear in usage docs but hard-error (or silently do nothing) in mise 2026.10.19. Errors now carry a precise span, e.g. `unsupported arg key parse`:
+These appear in usage docs but hard-error (or silently do nothing) in mise 2026.10.25. Errors now carry a precise span, e.g. `unsupported arg key parse`:
 
 | Syntax | Result in mise | Use instead |
 |--------|----------------|-------------|
@@ -556,13 +558,13 @@ These appear in usage docs but hard-error (or silently do nothing) in mise 2026.
 | `flag "--color" config="ui.color"` | `unsupported flag key config` | `env="..."` |
 | `config_alias "a" "b"` | `unsupported spec key config_alias` | — |
 | `cmd "x" { example "Header" "code" }` | `expected 1..=1 arguments, got 2` | `example "code" header="Header"` |
-| root-level `mount` in a TOML `usage` field | **no longer errors, but is ignored at run time** — the task reports no arguments and extra args pass through raw; only completion runs the mount | File-task `#USAGE mount`, or a `cmd` block |
-| `clause "x" separator=":::"` | values never reach the script; `:::` collides with mise's own task separator; **breaks completion for every task** | Separate tasks, or `arg "<args>..."` |
+| a spec with only `mount` (no `arg`, `flag`, or `cmd`) — TOML `usage` **or** file-task `#USAGE` | mise runs the usage parser only when a spec has at least one `arg`, `flag`, or `cmd`, so a mount-only spec is ignored at run time: the task reports no arguments and extra args pass through raw; only completion runs the mount | Add any `arg`/`flag` beside the root-level `mount` (it then works in TOML and file tasks, though `--help` lists only your own args), or put the mount inside a `cmd` block |
+| `clause "x" separator=":::"` | values never reach the script (the words are appended raw to the command); `:::` collides with mise's own task separator; **breaks completion for every task**, and `mise tasks validate` doesn't catch it (a body-less `clause` is a parse error it does catch) | Separate tasks, or `arg "<args>..."` |
 | `external_subcommand #true` | runs, but nothing is exported | `raw_args = true` |
 | `multicall #true` | `unexpected word` | — |
 | `dont_delimit_trailing_values #true` | ignored | — |
 | `version "…"` / `long_version "…"` | `-V`/`--version` print the version as `mise ERROR 1.0` and exit 1. A spec with only `version` and no args is treated as having no arguments (args pass raw) | Print the version from the script (e.g. a `--version` boolean flag) |
-| `flag … action="help_short"` / `"help_long"` | prints help through `mise ERROR failed to validate task`, exit 1 | Rely on the built-in `-h`/`--help` |
+| `flag … action="help"` / `"help_short"` / `"help_long"` / `"help_all"` | prints help through `mise ERROR failed to validate task`, exit 1 (also with `builtin=#true`) | Rely on the built-in `-h`/`--help` |
 | `inline choices` — `arg "<x>" choices "a" "b"` | **parses, validates nothing** | `arg "<x>" { choices "a" "b" }` |
 
 > **Working v6 policies** (verified): `unknown_flags "error"`, `subcommand_negates_reqs #true`, `allow_missing_positional #true`, `args_override_self #false`, `arg_required_else_help #true` (bare call prints usage and exits 1), `default_subcommand_flags`/`default_subcommand_help`, `help_template` (`{% raw %}`-wrapped in TOML), `heading` + `help_heading`, `flatten_help`, and `deprecated` / `deprecated_warn_at` / `deprecated_remove_at` (rendered in `--help` only — mise prints **no runtime warning**). Rich `choice "always" { alias "yes" }` entries and `choices ignore_case=#true` validate, but the value is **not normalised** (`ALWAYS`/`yes` reach the script as typed).
@@ -612,10 +614,11 @@ cmd "test"  { use "output" }
 '''
 ```
 
-**`output` / `exit_code` / `select`** — declare what a command writes and what its statuses mean. `output`/`exit_code` are metadata for docs and MCP consumers, **but `select` is enforced**: it turns the named flag into a choice over the declared outputs (`--format bogus` → `Invalid choice for option format: bogus, expected one of human, json`), and `--help` lists them as possible values. A boolean flag can select one output with `output "json" select="--json"`.
+**`output` / `exit_code` / `select`** — declare what a command writes and what its statuses mean. `output`/`exit_code` are metadata for docs and MCP consumers, **but `select` is enforced**: it turns the named flag into a choice over the declared outputs (`--format bogus` → `Invalid choice for option format: bogus, expected one of human, json`), and `--help` lists them as possible values. A boolean flag can select one output with `output "json" select="--json"`. The selected flag must be declared in that `cmd` or above — `select` naming an undeclared flag is a hard spec error (`… names no flag here or above it`) that also breaks completion for every task.
 
 ```
 cmd "check" {
+  flag "--format <f>"          // select needs this flag declared here or above
   output "human" default=#true help="Human-readable report"
   output "json" media_type="application/json" framing="json"
   select "--format"

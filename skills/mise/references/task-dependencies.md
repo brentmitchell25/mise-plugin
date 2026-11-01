@@ -33,7 +33,7 @@ run = "cargo build --release"
 
 A task is fresh when output mtime is newer than the newest source. The task definition itself is an implicit source, missing declared outputs force a run, and relative entries resolve from the task `dir` (`..` allowed).
 
-**Staleness also triggers when** (caching docs, 2026.10.x): the recorded list of source files (with each file's size and mtime) differs from the last successful run — so deleting, adding, or restoring an older copy re-runs it; any source has mtime 0 (1970-01-01); or, in content-hash mode, the outputs changed (same-size edits that restore the mtime are rehashed, 2026.10.17). A failed run records nothing. `--force` also re-runs the task's dependencies. A `sources` glob that matches nothing **warns** (`no files match sources for task build: …`, 2026.10.5).
+**Staleness also triggers when** (caching docs, 2026.10.x): the recorded list of source files (with each file's size and mtime) differs from the last successful run — so deleting, adding, or restoring an older copy re-runs it; any source has mtime 0 (1970-01-01); or, in content-hash mode, the outputs changed (same-size edits that restore the mtime are rehashed, 2026.10.17). A failed run records nothing. `--force` also re-runs the task's dependencies. A `sources` glob that matches nothing **warns** (`task build has sources defined but no matching files found`, 2026.10.5; the artifact cache adds `; artifact caching disabled`) and the task still runs.
 
 > ⚠️ **`global_inputs` gotcha (verified):** a task with **no `sources` of its own** still receives `task_config.global_inputs` plus `outputs = { auto = true }` — so it is **skipped** while those global inputs are unchanged. Give such tasks explicit `sources`, or run with `--force`.
 
