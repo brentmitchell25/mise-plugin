@@ -1,11 +1,11 @@
-Update the mise plugin's SKILL.md by crawling the latest mise documentation using parallel research agents.
+Update the mise plugin's skill (SKILL.md and its reference files) by crawling the latest mise documentation using parallel research agents.
 
 ## Process
 
-1. Read the current `skills/mise/SKILL.md` to understand the existing structure
-2. Establish the "since last update" baseline: run `git log -1 --format=%cd --date=short -- skills/mise/SKILL.md` for the last-update date (and note the current `version` in `.claude-plugin/plugin.json`)
+1. Read `skills/mise/SKILL.md` and the file list in `skills/mise/references/` to understand the existing structure
+2. Establish the "since last update" baseline: run `git log -1 --format=%cd --date=short -- skills/mise/` for the last-update date (and note the current `version` in `.claude-plugin/plugin.json`)
 3. Launch 6 parallel research agents — 5 documentation crawlers plus 1 release-notes auditor
-4. After all agents return, consolidate findings into an updated SKILL.md
+4. After all agents return, consolidate findings into the skill files
 5. Run the `mise run lint` task to validate the result
 
 ## Research Agents
@@ -61,7 +61,7 @@ Focus on: ALL arg attributes with types/defaults, ALL flag attributes with types
 This agent catches what the fixed documentation URLs above miss — brand-new features whose pages aren't in the crawl list, status changes buried in changelogs, renames, and changed defaults. Release notes are the authoritative record of what changed.
 
 Use the `gh` CLI (NOT WebFetch — these live on GitHub):
-- Baseline date: `git log -1 --format=%cd --date=short -- skills/mise/SKILL.md`
+- Baseline date: `git log -1 --format=%cd --date=short -- skills/mise/`
 - List releases: `gh release list --repo jdx/mise --limit 40`
 - For EVERY release newer than the baseline date, read its body: `gh release view <tag> --repo jdx/mise --json body -q .body`
 - Also check the usage spec: `gh release list --repo jdx/usage --limit 10` (+ `gh release view` for new ones)
@@ -77,37 +77,45 @@ Ignore pure bug-fixes and internal/CI/dependency changes unless they change docu
 
 ## Consolidation
 
-After all six agents return their findings, write the updated `skills/mise/SKILL.md` with these top-level sections, in this order:
+After all six agents return their findings, update the skill files under `skills/mise/`.
+
+`SKILL.md` loads every time the skill triggers, so it holds only what applies to every mise request. Keep it under 500 lines, with these sections in this order:
 
 1. **YAML Frontmatter** — `name: mise`; a description that names the kinds of mise work (config files, tasks, tools, environments, CLI) rather than listing individual features
-2. **Table of Contents** — linking to all sections below
+2. **Table of Contents**
 3. **STRICT ENFORCEMENT: Usage Field Required** — copy this section verbatim from the current file, do not modify it
-4. **Overview** — brief description of what mise covers
-5. **Task Definition Methods** — TOML tasks, file tasks, namespaces, remote tasks
-6. **Task Arguments - Usage Spec Reference** — comprehensive arg/flag/complete reference with all attributes, env var access patterns
-7. **Task Configuration Reference** — ALL fields with types, structured run/depends, extends, timeout, global task config, vars
-8. **Running Tasks (CLI)** — all commands and flags
-9. **Task Dependencies and Freshness** — depends/depends_post/wait_for, sources/outputs, skip_if, redactions
-10. **Task Output Caching** — local artifact cache, cache inputs, remote task cache
-11. **Task Tracing with OpenTelemetry** — `otel` settings and exporters
-12. **Dev Tools Management** — backends, TOML syntax, per-tool options, backend-specific config, shims, aliases, lockfiles
-13. **Environment Configuration** — basic vars, special directives, profiles, required/redacted, secrets, Tera templates
-14. **Hooks and Watchers** — hook types with env vars, watch_files, shell hooks
-15. **Project Daemons (`[daemons]`)** — daemons, providers, presets, ports
-16. **Project Diagnostics (`[doctor]`)** — project checks for `mise doctor project`
-17. **Command Wrappers (`[wrappers]`)**
-18. **Sandboxing and Safe Mode** — `deny_*`/`allow_*`, `MISE_SAFE`
-19. **Machine Bootstrap (Developer Setup)** — `[bootstrap]`, dotfiles, dotfile groups, dotfiles history
-20. **OCI Container Images**
-21. **Configuration and Settings** — file hierarchy, key settings reference, min_version, automatic env vars
-22. **Dependency Preparation (`[deps]`)**
-23. **Monorepo Tasks and Workspace Graph** — workspace project graph, affected tasks
-24. **Deprecation Calendar** — removal versions taken from mise's source
-25. **Best Practices** — DO/DON'T patterns, complete examples
+4. **Overview** — what mise covers, the mise version the skill was verified against, the top-level `mise.toml` keys
+5. **Reference Files** — one table row per reference file: link, when to read it, what it covers
+6. **Best Practices** — DO/DON'T patterns, complete examples
+
+Everything else lives in `skills/mise/references/`, one file per topic. Each file starts with its `##` section heading and a contents list, and links to other files by relative path (`dev-tools.md#lockfiles-miselock`, `../SKILL.md#best-practices`):
+
+| File | Section |
+|------|---------|
+| `task-definition.md` | Task Definition Methods — TOML tasks, file tasks, namespaces, remote tasks |
+| `usage-spec.md` | Task Arguments - Usage Spec Reference — arg/flag/complete attributes, env var access patterns |
+| `task-configuration.md` | Task Configuration Reference — all fields with types, structured run/depends, extends, timeout, global task config, vars |
+| `running-tasks.md` | Running Tasks (CLI) — commands and flags |
+| `task-dependencies.md` | Task Dependencies and Freshness — depends/depends_post/wait_for, sources/outputs, skip_if, redactions |
+| `task-caching.md` | Task Output Caching — local artifact cache, cache inputs, remote task cache |
+| `task-tracing.md` | Task Tracing with OpenTelemetry |
+| `dev-tools.md` | Dev Tools Management — backends, TOML syntax, per-tool options, backend-specific config, shims, aliases, lockfiles |
+| `environments.md` | Environment Configuration — basic vars, special directives, profiles, required/redacted, secrets, Tera templates |
+| `hooks.md` | Hooks and Watchers — hook types with env vars, watch_files, shell hooks |
+| `daemons.md` | Project Daemons (`[daemons]`) — daemons, providers, presets, ports |
+| `doctor.md` | Project Diagnostics (`[doctor]`) |
+| `wrappers.md` | Command Wrappers (`[wrappers]`) |
+| `sandboxing.md` | Sandboxing and Safe Mode |
+| `bootstrap.md` | Machine Bootstrap (Developer Setup) — `[bootstrap]`, dotfiles, dotfile groups, dotfiles history |
+| `oci.md` | OCI Container Images |
+| `settings.md` | Configuration and Settings — file hierarchy, key settings reference, min_version, automatic env vars |
+| `deps.md` | Dependency Preparation (`[deps]`) |
+| `monorepo.md` | Monorepo Tasks and Workspace Graph |
+| `deprecations.md` | Deprecation Calendar — removal versions taken from mise's source |
 
 Suffix a section title with "(Experimental)" while its feature is experimental, and drop the suffix when the feature stabilizes.
 
-> **Reconcile release notes against the doc crawl.** When Agent 6's findings conflict with Agents 1–5 on experimental/stable status, renamed keys, or changed defaults, the **release notes win** (doc pages lag behind releases). If a release introduced a major feature with no home in the structure above (e.g. Machine Bootstrap / dotfiles), ADD a new top-level section for it plus a matching Table of Contents entry. Verify any contested default or status with a direct `WebFetch`/`gh` check before writing.
+> **Reconcile release notes against the doc crawl.** When Agent 6's findings conflict with Agents 1–5 on experimental/stable status, renamed keys, or changed defaults, the **release notes win** (doc pages lag behind releases). If a release introduced a major feature with no home in the structure above (e.g. Machine Bootstrap / dotfiles), ADD a new reference file for it plus a matching row in SKILL.md's Reference Files table. Verify any contested default or status with a direct `WebFetch`/`gh` check before writing.
 
 ## Rules
 
@@ -117,11 +125,11 @@ Suffix a section title with "(Experimental)" while its feature is experimental, 
 - Note any deprecations with dates
 - Use tables for reference material, code blocks for examples
 - The file must be a practical reference that enables Claude to generate correct mise configurations
-- Always include a Table of Contents at the top of the file
+- Start every file with a table of contents (SKILL.md) or contents list (reference files)
 - Before keeping a negative claim (the Still Not Implemented table, anything described as hard-erroring, a no-op, or ignored), re-check it against the current mise binary; a claim that has since become false sends Claude around a feature that works
 - If any crawled page is unreachable, note what couldn't be fetched and use the existing content for that section
 - Reconcile Agent 6 (release notes) against Agents 1–5 (docs); release notes are authoritative for status changes (experimental↔stable), renames, and changed defaults
-- Add a new top-level section (and TOC entry) when a release introduced a major feature not covered by the structure above
+- Add a new reference file (and a Reference Files row) when a release introduced a major feature not covered by the files above
 - Write each change into the section it belongs to, as a current fact with the mise version that introduced it. Leave out "new since the last update" summaries and notes about what earlier versions of this skill said — the model reading the skill never saw those versions
 
 ## Validation

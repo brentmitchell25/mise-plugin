@@ -832,7 +832,7 @@ The skill provides Claude with comprehensive knowledge of:
 
 ## How It Works
 
-This plugin provides a single skill file (`SKILL.md`) that Claude reads when it detects mise-related context in your conversation. The skill contains comprehensive reference material covering the entire mise ecosystem — tasks, dev tools, environments, hooks, and configuration.
+This plugin provides one skill: a short `SKILL.md` that Claude loads when it detects mise-related context in your conversation, plus topic reference files in `skills/mise/references/` that Claude reads only when a request needs them. Together they cover the entire mise ecosystem — tasks, dev tools, environments, hooks, and configuration.
 
 The skill activates automatically when you mention mise, edit `mise.toml` files, or work with `mise-tasks/` directories.
 
@@ -841,10 +841,10 @@ The skill activates automatically when you mention mise, edit `mise.toml` files,
 This repo includes a Claude Code slash command for updating the skill as mise docs evolve:
 
 ```
-/update-skill    # Re-crawl mise docs and update SKILL.md
+/update-skill    # Re-crawl mise docs and update the skill files
 ```
 
-The command launches 6 parallel research agents — 5 documentation crawlers plus a release-notes auditor that diffs `jdx/mise` and `jdx/usage` releases since the last update — then consolidates findings into `skills/mise/SKILL.md`. Release notes take precedence over the doc pages for experimental/stable status, renamed keys, and changed defaults, since the docs lag behind releases. Additional mise tasks handle versioning and validation:
+The command launches 6 parallel research agents — 5 documentation crawlers plus a release-notes auditor that diffs `jdx/mise` and `jdx/usage` releases since the last update — then consolidates findings into `skills/mise/SKILL.md` and its reference files. Release notes take precedence over the doc pages for experimental/stable status, renamed keys, and changed defaults, since the docs lag behind releases. Additional mise tasks handle versioning and validation:
 
 ```bash
 mise run lint              # Validate skill file structure
