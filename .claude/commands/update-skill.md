@@ -3,7 +3,12 @@ Update the mise plugin's skill (SKILL.md and its reference files) by crawling th
 ## Process
 
 1. Read `skills/mise/SKILL.md` and the file list in `skills/mise/references/` to understand the existing structure
-2. Establish the "since last update" baseline: run `git log -1 --format=%cd --date=short -- skills/mise/` for the last-update date (and note the current `version` in `.claude-plugin/plugin.json`)
+2. Establish the baseline — the versions the skill was last verified against — from the Overview's verification line, not from git history (and note the current `version` in `.claude-plugin/plugin.json`):
+   ```bash
+   grep -oE 'Verified against mise [0-9]+\.[0-9]+\.[0-9]+' skills/mise/SKILL.md   # baseline mise version
+   grep -oE 'usage-lib [0-9]+\.[0-9]+\.[0-9]+' skills/mise/SKILL.md | head -1     # baseline usage-lib version
+   ```
+   Don't use the date of the last commit to `skills/mise/`: fixes, audits, and refactors touch the skill without re-verifying it, so that date can be newer than the last refresh and makes the run skip releases. If the verification line is missing, stop and ask for the baseline version rather than guessing.
 3. Launch 6 parallel research agents — 5 documentation crawlers plus 1 release-notes auditor
 4. After all agents return, consolidate findings into the skill files
 5. Run the `mise run lint` task to validate the result
@@ -61,10 +66,10 @@ Focus on: ALL arg attributes with types/defaults, ALL flag attributes with types
 This agent catches what the fixed documentation URLs above miss — brand-new features whose pages aren't in the crawl list, status changes buried in changelogs, renames, and changed defaults. Release notes are the authoritative record of what changed.
 
 Use the `gh` CLI (NOT WebFetch — these live on GitHub):
-- Baseline date: `git log -1 --format=%cd --date=short -- skills/mise/`
-- List releases: `gh release list --repo jdx/mise --limit 40`
-- For EVERY release newer than the baseline date, read its body: `gh release view <tag> --repo jdx/mise --json body -q .body`
-- Also check the usage spec: `gh release list --repo jdx/usage --limit 10` (+ `gh release view` for new ones)
+- Baseline: the mise and usage-lib versions from Process step 2 (pass them into this agent's prompt)
+- List releases: `gh release list --repo jdx/mise --limit 40` — the baseline tag `v<baseline>` must appear in the list; raise `--limit` until it does
+- For EVERY release after the baseline tag, read its body: `gh release view <tag> --repo jdx/mise --json body -q .body`
+- Also check the usage spec: `gh release list --repo jdx/usage --limit 10`, then `gh release view` for every release after the baseline usage-lib version. Report which usage-lib version the latest mise release bundles (its `Cargo.lock`) — usage releases newer than that aren't in mise yet
 
 Report, grouped by impact, everything from the **Added / Changed / Deprecated / Removed** sections that affects how users author `mise.toml` / tasks / config. For each finding give: the release version, a one-line description, the exact config/CLI syntax if shown, and whether it needs a NEW SKILL section or an edit to an existing one. Prioritize and flag loudly:
 - **Brand-new features** — config sections, backends, package managers, CLI commands, settings, tool/flag options — ESPECIALLY any with no doc page in the Agent 1–5 URL list (highest-value finds; include the doc URL if one now exists).
@@ -84,7 +89,7 @@ After all six agents return their findings, update the skill files under `skills
 1. **YAML Frontmatter** — `name: mise`; a description that names the kinds of mise work (config files, tasks, tools, environments, CLI) rather than listing individual features
 2. **Table of Contents**
 3. **STRICT ENFORCEMENT: Usage Field Required** — copy this section verbatim from the current file, do not modify it
-4. **Overview** — what mise covers, the mise version the skill was verified against, the top-level `mise.toml` keys
+4. **Overview** — what mise covers, the versions the skill was verified against, the top-level `mise.toml` keys. Keep the verification line's wording — `> **Verified against mise <version>** … **usage-lib <version>**` — because the next run reads its baseline from it, and change those versions only when the content has been verified against them
 5. **Reference Files** — one table row per reference file: link, when to read it, what it covers
 6. **Best Practices** — DO/DON'T patterns, complete examples
 

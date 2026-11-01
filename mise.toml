@@ -197,6 +197,13 @@ for section in "STRICT ENFORCEMENT" "Overview" "Reference Files" "Best Practices
   fi
 done
 
+# /update-skill reads its baseline (the last verified mise version) from this line
+verified=$(grep -cE 'Verified against mise [0-9]+\.[0-9]+\.[0-9]+' "$skill" || true)
+if [ "$verified" -ne 1 ]; then
+  echo "ERROR: $skill needs exactly one 'Verified against mise <version>' line in the Overview (found $verified); /update-skill reads its baseline from it"
+  exit 1
+fi
+
 # SKILL.md loads every time the skill triggers; detail belongs in references/
 lines=$(wc -l < "$skill" | tr -d ' ')
 if [ "$lines" -gt 500 ]; then
