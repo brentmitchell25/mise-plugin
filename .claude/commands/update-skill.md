@@ -77,7 +77,7 @@ Ignore pure bug-fixes and internal/CI/dependency changes unless they change docu
 
 ## Consolidation
 
-After all 5 agents return their findings, write the updated `skills/mise/SKILL.md` with this exact section structure:
+After all six agents return their findings, write the updated `skills/mise/SKILL.md` with this exact section structure:
 
 1. **YAML Frontmatter** — `name: mise`, description covering all areas
 2. **Table of Contents** — linking to all sections below
