@@ -118,6 +118,7 @@ Suffix a section title with "(Experimental)" while its feature is experimental, 
 - Use tables for reference material, code blocks for examples
 - The file must be a practical reference that enables Claude to generate correct mise configurations
 - Always include a Table of Contents at the top of the file
+- Before keeping a negative claim (the Still Not Implemented table, anything described as hard-erroring, a no-op, or ignored), re-check it against the current mise binary; a claim that has since become false sends Claude around a feature that works
 - If any crawled page is unreachable, note what couldn't be fetched and use the existing content for that section
 - Reconcile Agent 6 (release notes) against Agents 1–5 (docs); release notes are authoritative for status changes (experimental↔stable), renames, and changed defaults
 - Add a new top-level section (and TOC entry) when a release introduced a major feature not covered by the structure above
