@@ -79,7 +79,7 @@ Ignore pure bug-fixes and internal/CI/dependency changes unless they change docu
 
 After all six agents return their findings, write the updated `skills/mise/SKILL.md` with these top-level sections, in this order:
 
-1. **YAML Frontmatter** — `name: mise`, description covering all areas
+1. **YAML Frontmatter** — `name: mise`; a description that names the kinds of mise work (config files, tasks, tools, environments, CLI) rather than listing individual features
 2. **Table of Contents** — linking to all sections below
 3. **STRICT ENFORCEMENT: Usage Field Required** — copy this section verbatim from the current file, do not modify it
 4. **Overview** — brief description of what mise covers

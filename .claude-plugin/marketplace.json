@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "mise",
-      "description": "Use when working with mise - creating/editing mise.toml or .mise.toml files, defining tasks with usage field arguments, task skip_if and task-scoped fnox secrets, managing dev tools and environments, automatic tool updates, per-machine vars prompts, configuring hooks, task caching, OpenTelemetry task tracing, sandboxing, project daemons, project diagnostics, command wrappers, shared config includes and the global override file, the mise lsp language server, machine bootstrap, dotfiles and dotfile groups, dotfiles history, agent skills, monorepo workspaces, or when user mentions mise configuration.",
+      "description": "Use when working with mise - creating or editing mise.toml, .mise.toml, mise.local.toml, or file tasks; defining tasks and their usage-spec arguments; managing dev tools, backends, and lockfiles; configuring environments, secrets, hooks, daemons, sandboxing, or settings; machine bootstrap and dotfiles; monorepo workspaces; or running any mise CLI command.",
       "source": "./",
       "category": "development",
       "keywords": [
