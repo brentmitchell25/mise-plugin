@@ -26,7 +26,7 @@ description: Use when working with mise - creating/editing mise.toml or .mise.to
   - [Subcommands (cmd block)](#subcommands-cmd-block)
   - [Command Effects (effect=)](#command-effects-effect)
   - [Spec-Level Metadata](#spec-level-metadata)
-  - [Formerly Feature-Gated — Now Working](#formerly-feature-gated--now-working)
+  - [Validation and Env-Backed Choices](#validation-and-env-backed-choices)
   - [Still Not Implemented](#still-not-implemented-do-not-use)
   - [Flag Groups, Flagsets, and Outputs (v6)](#flag-groups-flagsets-and-outputs-v6)
 - [Task Configuration Reference](#task-configuration-reference)
@@ -470,7 +470,7 @@ The `usage` field uses [KDL-inspired syntax](https://usage.jdx.dev/) to define a
 
 > 🔴 **Version context (verified 2026-10-25).** mise 2026.10.19 bundles **usage-lib 7.1.1** (2026.10.4 → 6.12.1, 2026.10.6 → 7.0.0, 2026.10.12 → 7.0.1, 2026.10.13 → 7.0.2, 2026.10.16 → 7.1.0, 2026.10.18+ → 7.1.1; mise's own CLI spec still declares `min_usage_version "6.11"`). **The usage 6 → 7 major bump changes nothing a mise task author writes** — its breaking changes (derive macros no longer read `Cargo.toml`, `usage generate fig` removed, `usage-argv` internals) are Rust-library/CLI concerns; no spec syntax was added, removed, or renamed. In **2026.8.11** mise migrated its *own* CLI parser, help output, and shell completions from clap to usage-rs.
 >
-> **Nothing is compiled out any more.** Since **2026.8.13** mise depends on `usage-cli`, whose manifest enables usage-lib's `validation` and `unstable_choices_env` features; Cargo unifies features across the build, so mise's single usage-lib gets them. `validate=` and `choices env=` — previously hard errors in this skill — **work and are enforced** (see [Formerly Feature-Gated](#formerly-feature-gated--now-working)).
+> **Nothing is compiled out.** Since **2026.8.13** mise depends on `usage-cli`, whose manifest enables usage-lib's `validation` and `unstable_choices_env` features; Cargo unifies features across the build, so mise's single usage-lib gets them. `validate=` and `choices env=` **work and are enforced** (see [Validation and Env-Backed Choices](#validation-and-env-backed-choices)).
 >
 > **usage 6.11–6.12 change how specs are written:** `choices run="cmd"` (command-backed choices that validate), `complete` nested inside an `arg`/`flag`, `complete … delegate="tool"`, `$usage_cmd` for the chosen subcommand, `default_subcommand_on_empty`, and `logo`. All re-verified on mise 2026.10.19 below.
 >
@@ -498,7 +498,7 @@ Every attribute is accepted both as a prop (`arg "<f>" key=value`) and as a chil
 | `var_min` | integer | none | Minimum values when variadic |
 | `var_max` | integer | none | Maximum values when variadic |
 | `choices` | **child node only** | none | Restrict to enumerated set — `arg "<x>" { choices "a" "b" }`. **The inline `arg "<x>" choices "a" "b"` form is silently ignored.** `choices strict=#false "a" "b"` **suggests** without rejecting other values (v6); `ignore_case=#true` accepts any case but does **not** normalise the value. `choices env="VAR"` reads the set from an env var; `choices run="cmd"` from a command's output (6.12) — see [Dynamic Choices](#dynamic-choices-env-and-run). |
-| `validate` / `validate_error` | string (expr) | none | Expression checked against `value` (e.g. `int(value) >= 1`, `value matches '^[a-z]+$'`, plus `date(value) > date('2030-01-01')`, `fromJSON(value).a == 1`, `fromBase64(value) == 'hi'` — all verified); `validate_error` is the message. **Works in mise** (see [Formerly Feature-Gated](#formerly-feature-gated--now-working)). |
+| `validate` / `validate_error` | string (expr) | none | Expression checked against `value` (e.g. `int(value) >= 1`, `value matches '^[a-z]+$'`, plus `date(value) > date('2030-01-01')`, `fromJSON(value).a == 1`, `fromBase64(value) == 'hi'` — all verified); `validate_error` is the message. **Works in mise** (see [Validation and Env-Backed Choices](#validation-and-env-backed-choices)). |
 | `complete` | child node | none | **6.12.** Completion attached directly to this arg — `arg "<x>" { complete run="…" }`. Beats a same-named top-level `complete`. |
 | `effect` | enum / child node | none | `read` \| `write` \| `destructive` — raises the command's effect |
 | `double_dash` | enum | `optional` | `"required"`, `"optional"`, `"automatic"`, `"preserve"`. **Now enforced** under v6. |
@@ -984,9 +984,9 @@ config {
 
 > **mise resolves nothing from a `config` block.** Verified: with `prop "jobs" … { env "MYCLI_JOBS" }`, `MYCLI_JOBS=5 mise run t` leaves the value unset. It is metadata only — the "CLI > env > config file > default" chain does not apply to tasks. Use `env=` on the `arg`/`flag` itself for env backing.
 
-### Formerly Feature-Gated — Now Working
+### Validation and Env-Backed Choices
 
-Earlier versions of this skill said `validate=` and `choices env=` were compiled out of mise and hard-errored. **That is no longer true** — both work and are enforced on mise 2026.10.19 (the fix traces to 2026.8.13, when mise began depending on `usage-cli`, whose manifest turns on usage-lib's `validation` and `unstable_choices_env` features):
+`validate=` and `choices env=` work and are enforced on mise 2026.8.13 and later — mise depends on `usage-cli`, whose manifest turns on usage-lib's `validation` and `unstable_choices_env` features. Verified on 2026.10.19:
 
 | Syntax | Valid value | Invalid value |
 |--------|-------------|---------------|
@@ -1849,8 +1849,6 @@ Protocol reference: `https://mise.jdx.dev/tasks/remote-cache-protocol.html` (pro
 ### Rust Compiler Action Cache — REMOVED (`rust_cache` is a no-op)
 
 > 🔴 **`rust_cache` is a deprecated NO-OP. Do not use it.** The JSON schema marks the field `"deprecated": true` with the description *"deprecated no-op; use mbx for Rust action caching instead."* Setting `rust_cache = true` on a task or in `[task_config]` does **nothing** — it neither errors nor caches. Removal is scheduled for **2027.8.14**.
->
-> Earlier versions of this skill documented it as a working experimental rustc action cache (concurrent blob prefetch, shared remote backend). That is no longer accurate.
 
 **Migrate to [mbx](https://mr-boxington.jdx.dev/getting-started)** (Mr. Boxington), the separate `jdx` project that now owns Rust action caching:
 
@@ -6001,7 +5999,6 @@ Dates below come from mise's own `deprecated_at!` macros and `settings.toml` (`d
 - Use shell positional parameters or `"$@"`-style expansion for arguments
 - Use `$args` in PowerShell
 - Use inline template functions `{{arg()}}`/`{{option()}}`/`{{flag()}}` in run scripts (deprecated)
-- Believe older advice that `choices env=` / `validate=` are compiled out of mise — both **work** since 2026.8.13
 - Use usage attributes that still don't exist: `parse`, flag `config=`, `config_alias`, or a 2-positional `example` — they hard-error
 - Use `clause`, `external_subcommand`, `multicall`, `version`, or `long_version` in task specs — they misbehave in mise (and `clause` breaks completion for every task)
 - Write `choices` inline (`arg "<env>" choices "a" "b"`) — it parses but validates nothing; use `{ choices "a" "b" }`
