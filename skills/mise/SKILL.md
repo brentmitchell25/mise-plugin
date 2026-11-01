@@ -108,9 +108,7 @@ description: Use when working with mise - creating/editing mise.toml or .mise.to
 
 ## 🔴 STRICT ENFORCEMENT: Usage Field Required
 
-**This skill WILL NOT generate tasks with shell-native argument handling.**
-
-All task arguments MUST be defined using the `usage` field. This is non-negotiable.
+Define every task argument with the `usage` field (or `#USAGE` lines in a file task) and read it from the `usage_*` environment variables. Don't read task arguments through shell-native positional parameters (`$1`, `"$@"`) or inline Tera functions; the table below gives the reasons. The rule covers how a task receives its arguments — `$1` inside an awk program or a shell function in the script body is unrelated.
 
 ### ✅ REQUIRED Pattern
 
@@ -453,8 +451,6 @@ oras push ghcr.io/myorg/shared-tasks:1.0.0 build.toml scripts/deploy   # publish
 ---
 
 ## Task Arguments - Usage Spec Reference
-
-**REMINDER:** Always use the `usage` field. Never use `$1`, shell positional parameters, or other shell-native argument handling.
 
 The `usage` field uses [KDL-inspired syntax](https://usage.jdx.dev/) to define arguments, flags, and completions.
 
