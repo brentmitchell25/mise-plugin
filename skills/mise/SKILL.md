@@ -197,18 +197,8 @@ mise is an all-in-one developer environment tool that manages:
 `_`, `alias` (deprecated), `bootstrap`, `daemon_groups`, `daemon_providers`, `daemons`, `daemons_settings`, `deps`, `doctor`,
 `dotenv` (deprecated), `dotfile_groups`, `dotfiles`, `env`, `env_file` (deprecated), `env_path` (deprecated),
 `experimental_monorepo_root` (deprecated), `history`, `hooks`, `include`, `min_version`, `monorepo`, `monorepo_root`, `oci`,
-`plugins`, `redactions`, **`secrets`**, `settings`, `shell_alias`, `task_config`, `task_templates`, `tasks`, `tool_alias`, `tool_config`,
+`plugins`, `redactions`, `secrets`, `settings`, `shell_alias`, `task_config`, `task_templates`, `tasks`, `tool_alias`, `tool_config`,
 `tools`, `vars`, `watch_files`, `wrappers`.
-
-> **New since 2026.10.3:** `secrets` (`[secrets.fnox]`, experimental — [Task-Scoped Secrets](#task-scoped-secrets-experimental)).
-> **Headline changes 2026.10.4 → 2026.10.19:** task [`skip_if`](#conditional-skip-skip_if) · task `secrets` ·
-> [`mise lsp`](#language-server-mise-lsp-20261018) · global [override file](#file-hierarchy) + `mise config explain` ·
-> [per-machine `[vars]` prompts](#vars-section) · [automatic tool updates](#automatic-tool-updates) ·
-> [identity install layout, download cache, `global` link](#install-layout-download-cache-and-the-global-link) ·
-> lockfiles rebuilt completely by default (`lockfile_mode = "generate"`) · 24h `minimum_release_age` on **every** backend ·
-> Java defaults to Temurin · unknown tool options fail installs · untrusted project `[settings]` ignored · `path:` needs trust ·
-> workspace graph / `--affected` / `task.auto_infer` no longer experimental (Gradle provider added) · `git::`/`oci::` task includes
-> and OTel export now **require** experimental · usage-lib 7.x (no spec-syntax changes).
 
 > There is **no `[prepare]` key** — that feature is `[deps]` (the CLI accepts `mise prepare` as an alias for `mise deps`). See [Dependency Preparation](#dependency-preparation-deps).
 
@@ -5086,7 +5076,7 @@ Supported files include `.nvmrc`, `.node-version`, `package.json`, `.python-vers
 
 ### Key Settings Reference
 
-mise ships **351 settings** (leaf count from `https://mise.jdx.dev/schema/mise.json` on 2026.10.19: 177 top-level keys, 40 of which are nested namespaces — note `mise settings --all` prints only the ~213 that resolve to a value, omitting unset optional ones). **New since 2026.10.3 (22):** `download_cache`, `download_cache_max_size`, `extract_max_ratio`, `install_layout`, `lockfile_auto_prune`, `prune.exclude`, `self_update.auto`, `self_update.check_duration`, `tool_update.global_auto`, `tool_update.check_duration`, `write_targets.{tools,packages,dotfiles}`, `github.enterprise_hosts`, `github.oauth_cache_get`, `github.oauth_cache_set`, `github.oauth_cache_secure_enclave`, `github.oauth_copy_code`, `pypi.keyring_provider`, `system_packages.elevate_with`, `system_packages.ostree`, `dotfiles.windows_symlinks`. None removed. **Changed defaults/types:** `lockfile_mode` `merge` → **`generate`** (2026.10.19); `java.shorthand_vendor` `openjdk` → **`temurin`** (2026.10.5); `paranoid` bool → **bool or list** (2026.10.14); `env_file` path → **list** (2026.10.14); `fetch_remote_versions_cache` `"1h"` → **unset** (2026.10.11, see below). This is a representative subset — run `mise settings --all` (or `mise settings ls`) for the live list, and `mise settings set <key> <value>` / `mise settings get <key>` to manage them.
+mise ships **351 settings** (leaf count from `https://mise.jdx.dev/schema/mise.json` on 2026.10.19: 177 top-level keys, 40 of which are nested namespaces — note `mise settings --all` prints only the ~213 that resolve to a value, omitting unset optional ones). **Changed defaults/types:** `lockfile_mode` `merge` → **`generate`** (2026.10.19); `java.shorthand_vendor` `openjdk` → **`temurin`** (2026.10.5); `paranoid` bool → **bool or list** (2026.10.14); `env_file` path → **list** (2026.10.14); `fetch_remote_versions_cache` `"1h"` → **unset** (2026.10.11, see below). This is a representative subset — run `mise settings --all` (or `mise settings ls`) for the live list, and `mise settings set <key> <value>` / `mise settings get <key>` to manage them.
 
 ```toml
 [settings]
