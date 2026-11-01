@@ -5835,7 +5835,7 @@ Dates below come from mise's own `deprecated_at!` macros and `settings.toml` (`d
 
 | Removal | What | Migrate to |
 |---------|------|------------|
-| **2026.11.0** ⚠️ **imminent** | `go.mod` patch-less `go X.Y` and `CMakeLists.txt` `cmake_minimum_required` version **floors** stop being read (warn since 2026.8.10); `idiomatic_version_file_ignore_minimum_versions` goes with them. `toolchain goX.Y.Z` and (since 2026.10.9) an exact `go X.Y.Z` are unaffected. | Pin an exact version |
+| **2026.11.0** | `go.mod` patch-less `go X.Y` and `CMakeLists.txt` `cmake_minimum_required` version **floors** stop being read (warn since 2026.8.10); `idiomatic_version_file_ignore_minimum_versions` goes with them. `toolchain goX.Y.Z` and (since 2026.10.9) an exact `go X.Y.Z` are unaffected. | Pin an exact version |
 | **2026.11.0** (warn) | `credential_command` legacy single positional argument (the hostname arg); `*.default_packages_file`; `dotnet.package_flags`; **`always_keep_download`** | `MISE_CREDENTIAL_HOST`/`MISE_CREDENTIAL_PROVIDER`; tool-level `postinstall`; `prerelease` option; the download cache |
 | **2026.12.0** | `shorthands_file` · `env.mise.*` namespace · `value`/`values` keys in `_.file`/`_.path`/`_.source` | `[plugins]` · `env._.*` · `path` (string or array) |
 | **2026.12.0** (warn) | `[monorepo].lockfile` unset behavior; `aqua.registry_url`; `auto_env` platform-config warning | Set them explicitly; `aqua.registries` |
