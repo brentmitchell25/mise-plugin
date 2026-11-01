@@ -77,7 +77,7 @@ Ignore pure bug-fixes and internal/CI/dependency changes unless they change docu
 
 ## Consolidation
 
-After all six agents return their findings, write the updated `skills/mise/SKILL.md` with this exact section structure:
+After all six agents return their findings, write the updated `skills/mise/SKILL.md` with these top-level sections, in this order:
 
 1. **YAML Frontmatter** — `name: mise`, description covering all areas
 2. **Table of Contents** — linking to all sections below
@@ -87,14 +87,25 @@ After all six agents return their findings, write the updated `skills/mise/SKILL
 6. **Task Arguments - Usage Spec Reference** — comprehensive arg/flag/complete reference with all attributes, env var access patterns
 7. **Task Configuration Reference** — ALL fields with types, structured run/depends, extends, timeout, global task config, vars
 8. **Running Tasks (CLI)** — all commands and flags
-9. **Task Dependencies and Caching** — depends/depends_post/wait_for, sources/outputs, redactions
-10. **Dev Tools Management** — backends, TOML syntax, per-tool options, backend-specific config, shims, aliases
-11. **Environment Configuration** — basic vars, special directives, profiles, required/redacted, Tera templates
-12. **Hooks and Watchers** — hook types with env vars, watch_files, shell hooks
-13. **Configuration and Settings** — file hierarchy, key settings reference, min_version, automatic env vars
-14. **Prepare Feature (Experimental)** — if still experimental
-15. **Monorepo Tasks (Experimental)** — if still experimental
-16. **Best Practices** — DO/DON'T patterns, complete examples
+9. **Task Dependencies and Freshness** — depends/depends_post/wait_for, sources/outputs, skip_if, redactions
+10. **Task Output Caching** — local artifact cache, cache inputs, remote task cache
+11. **Task Tracing with OpenTelemetry** — `otel` settings and exporters
+12. **Dev Tools Management** — backends, TOML syntax, per-tool options, backend-specific config, shims, aliases, lockfiles
+13. **Environment Configuration** — basic vars, special directives, profiles, required/redacted, secrets, Tera templates
+14. **Hooks and Watchers** — hook types with env vars, watch_files, shell hooks
+15. **Project Daemons (`[daemons]`)** — daemons, providers, presets, ports
+16. **Project Diagnostics (`[doctor]`)** — project checks for `mise doctor project`
+17. **Command Wrappers (`[wrappers]`)**
+18. **Sandboxing and Safe Mode** — `deny_*`/`allow_*`, `MISE_SAFE`
+19. **Machine Bootstrap (Developer Setup)** — `[bootstrap]`, dotfiles, dotfile groups, dotfiles history
+20. **OCI Container Images**
+21. **Configuration and Settings** — file hierarchy, key settings reference, min_version, automatic env vars
+22. **Dependency Preparation (`[deps]`)**
+23. **Monorepo Tasks and Workspace Graph** — workspace project graph, affected tasks
+24. **Deprecation Calendar** — removal versions taken from mise's source
+25. **Best Practices** — DO/DON'T patterns, complete examples
+
+Suffix a section title with "(Experimental)" while its feature is experimental, and drop the suffix when the feature stabilizes.
 
 > **Reconcile release notes against the doc crawl.** When Agent 6's findings conflict with Agents 1–5 on experimental/stable status, renamed keys, or changed defaults, the **release notes win** (doc pages lag behind releases). If a release introduced a major feature with no home in the structure above (e.g. Machine Bootstrap / dotfiles), ADD a new top-level section for it plus a matching Table of Contents entry. Verify any contested default or status with a direct `WebFetch`/`gh` check before writing.
 
