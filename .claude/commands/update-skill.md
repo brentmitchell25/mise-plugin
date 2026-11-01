@@ -121,6 +121,7 @@ Suffix a section title with "(Experimental)" while its feature is experimental, 
 - If any crawled page is unreachable, note what couldn't be fetched and use the existing content for that section
 - Reconcile Agent 6 (release notes) against Agents 1–5 (docs); release notes are authoritative for status changes (experimental↔stable), renames, and changed defaults
 - Add a new top-level section (and TOC entry) when a release introduced a major feature not covered by the structure above
+- Write each change into the section it belongs to, as a current fact with the mise version that introduced it. Leave out "new since the last update" summaries and notes about what earlier versions of this skill said — the model reading the skill never saw those versions
 
 ## Validation
 
