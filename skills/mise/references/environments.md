@@ -112,7 +112,7 @@ _.file = { path = [".env", ".env.local"], find_up = true }   # search config roo
 
 #### `_.source` — Source shell scripts
 
-Options: `path` (string or array), `tools`, `redact`.
+Options: `path` (string or array), `tools`, `redact`. The directive itself can also be an array of strings or tables (see [Multiple Identical Directives](#multiple-identical-directives)).
 
 ```toml
 [env]
@@ -162,14 +162,27 @@ mise loads the plugin, calls its `MiseEnv` hook for env vars and `MisePath` hook
 
 #### Multiple Identical Directives
 
-TOML doesn't allow duplicate keys, so use array-of-tables:
+TOML doesn't allow duplicate keys. A second `_.source` (or `_.file`/`_.path`) key in one `[env]` table is a parse error that rejects the **whole file**: `mise env` exits 1 and every shim in that tree fails. Two forms keep per-entry options (verified on 2026.10.25):
 
 ```toml
+# A directive array whose items are tables: each item keeps its own options
+[env]
+_.source = [{ path = "./script_1.sh", redact = true }, { path = "./script_2.sh", tools = true }]
+```
+
+```toml
+# Array-of-tables: blocks resolve in order
 [[env]]
 _.source = "./script_1.sh"
 [[env]]
-_.source = "./script_2.sh"
+_.source = { path = "./script_2.sh", tools = true }
 ```
+
+- A plain-string array (`_.source = ["a.sh", "b.sh"]`) runs both scripts in order but carries **no** `tools`/`redact`. A single table with `path = [...]` applies its options to every path.
+- One file can't mix `[env]` and `[[env]]` (`duplicate key` at `[[env]]`). Convert the whole file.
+- A directive written below a `[tasks.*]` header belongs to that task. Uncommented it's `unknown field '_'`; commented out it silently does nothing.
+
+Worked example, including ordering rules for a script that reads a variable: [per-tree identity](per-tree-identity.md#two-_source-scripts-in-one-tree).
 
 > Array parsing was tightened in 2026.7.12: accidental array forms for `vars` and task `env`/`vars` are rejected. Intentional `[[env]]` and directive-level arrays (`_.source`, `_.file`, `_.path`) remain supported.
 
@@ -180,6 +193,8 @@ _.source = "./script_2.sh"
 NODE_VERSION = { value = "{{ tools.node.version }}", tools = true }
 _.path = { path = ["{{env.GEM_HOME}}/bin"], tools = true }
 ```
+
+Plain entries resolve in written order, so a script without `tools = true` sees only the variables above it. `tools = true` entries resolve after **every** plain entry from **every** config file. A global `_.source = { …, tools = true }` therefore sees a project's override of a variable it reads (verified on 2026.10.25). See [per-tree identity](per-tree-identity.md#global-default).
 
 ### Profiles / Configuration Environments (`MISE_ENV`)
 

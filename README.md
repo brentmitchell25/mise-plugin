@@ -84,6 +84,7 @@ This plugin is a pure skill — no commands, hooks, or MCP servers. It activates
 - **Special directives** — `_.path`, `_.file` (with `expand` and the `mise-dotenv` parser), `_.source`, `_.python.venv`
 - **Configuration environments** — `MISE_ENV`, `.miserc.toml` / `.miserc.local.toml`, platform auto-envs
 - **Templates** — Tera v2 templating with functions, filters, tests, and a v1 → v2 migration table
+- **Per-tree identity recipe** — pin a different git/gh/npm/Claude Code account per directory tree (gh token script, `includeIf`, `NPM_CONFIG_USERCONFIG`, `CLAUDE_CONFIG_DIR`, an `identity` check task), source two scripts in one tree, and keep AI agent shells (Claude Code) honoring each tree's `[env]` with `--shims`
 
 ### Services and Diagnostics
 - **Project daemons** — `[daemons]` with PostgreSQL/Redis/CockroachDB/NATS/SpiceDB presets (Windows too, except Redis), custom `run`/`task` daemons, `[daemon_groups]`, cross-project references, `proxy_idle_timeout`, and `port = "auto"` plus stable `<NAME>_URL` hostnames for running one stack across git worktrees
