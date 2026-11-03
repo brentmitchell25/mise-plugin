@@ -130,6 +130,7 @@ The full reference lives in `references/`, one file per topic. Before writing or
 | [`references/task-tracing.md`](references/task-tracing.md) | Exporting task traces or logs over OpenTelemetry | Task Tracing with OpenTelemetry (Experimental) |
 | [`references/dev-tools.md`](references/dev-tools.md) | Adding or pinning tools, choosing a backend, lockfiles, shims, tool CLI commands | Backends Overview, TOML Syntax for Tools, Per-Tool Options, Backend-Specific Configuration, Lazy Tools… |
 | [`references/environments.md`](references/environments.md) | Env vars, dotenv files, `MISE_ENV` profiles, secrets, Tera templates | Basic Variables, Special Directives (env._), Profiles / Configuration Environments (MISE_ENV), Required and Redacted Variables, Secrets (fnox, SOPS, age)… |
+| [`references/per-tree-identity.md`](references/per-tree-identity.md) | Pinning a different git/gh/npm/Claude Code account per directory tree, sourcing two scripts in one tree, or an AI agent shell ignoring a tree's `[env]` after `cd` | Layout, gh Token Script, Override Trees, Two `_.source` Scripts in One Tree, Git Identity (includeIf), npm and Claude Code Config per Tree, identity Task, Agent Shells and `--shims`… |
 | [`references/hooks.md`](references/hooks.md) | Running commands on cd/enter/leave/install, or `watch_files` | Hook Types, Syntax, Watch Files, Hook Environment Variables, Per-Tool postinstall (not a hook) |
 | [`references/daemons.md`](references/daemons.md) | Declaring long-lived services or making tasks depend on them | Declaring Daemons, Tasks That Require Daemons, Groups, Namespaces, and Cross-Project Daemons, Shared Server Providers ([daemon_providers]), Service Presets… |
 | [`references/doctor.md`](references/doctor.md) | Adding project checks for `mise doctor project` | Project Diagnostics ([doctor]) |
@@ -176,7 +177,7 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Set `expand = true` on a structured env file only when you actually want shell expansion
 - Redact sensitive values with `redact = true`; use fnox, SOPS, or direct-age for secrets
 - Use templates for dynamic values instead of hardcoding paths
-- Use shims in `.zprofile`/`.bash_profile` and PATH activation in `.zshrc`/`.bashrc`
+- Use shims in `.zprofile`/`.bash_profile` and PATH activation in `.zshrc`/`.bashrc`, but `mise activate <shell> --shims` when `CLAUDECODE` is set: an agent shell snapshotted at session start never re-runs `hook-env`, so a later `cd` ignores that tree's `[env]` ([per-tree identity](references/per-tree-identity.md#ai-agent-shells-ignore-the-tree-after-cd))
 - Use `[tool_alias]` (not deprecated `[alias]`)
 - Pin tool versions with `mise.lock`; prefer **`[tool_config] locked = true`** for config-root scope over the invocation-wide `locked` setting
 - Remember `minimum_release_age` is **already on at 24h** by default for **every** backend (2026.10.15); raise it (e.g. `"7d"`) to harden, or set `"0s"` to opt out — don't assume unset means off
@@ -288,6 +289,7 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Use `git::`/`oci::` task includes or `file = "git::…"` without `experimental = true` (gated since 2026.10.5)
 - Put secrets in task `env`, `cache.env`/`global_env` values, `vars`, or `command_inputs` when a remote task cache is configured — the action description is uploaded verbatim (use `pass_through_env`)
 - Set `PATH` in `[env]` — it's ignored; use `_.path`
+- Write two `_.source` keys in one `[env]` table — it's a TOML duplicate-key error that rejects the whole file (every shim in the tree fails); use `_.source = [{ path = … }, { path = … }]` or `[[env]]` blocks, and keep env blocks above the first `[tasks.*]` header
 - Name a structured env file `.env.yml` — only `.json`/`.yaml`/`.toml` are structured; `.yml` is parsed as dotenv
 - Use `state = "absent"` on `apt:`/`brew:`/`choco:`/… packages — only pacman, scoop, snap, zypper (and dnf on rpm-ostree with `ostree = "layer"`) remove
 - Put `encrypt = true` on symlink/copy/template dotfile entries — it applies to `mode = "track"` only
