@@ -136,6 +136,7 @@ Added **2026.9.18** (not experimental; docs `https://mise.jdx.dev/configuration.
 include = [
   "git::https://github.com/myorg/platform.git//mise.toml?ref=main",
   "oci::ghcr.io/myorg/platform-config@sha256:0f1e2d3c...",   # artifact with mise.toml at its root
+  "zip::https://example.com/platform-config.zip",            # 2026.11.4: zip over http(s), mise.toml at its root
   "./config/tools.toml",                                      # 2026.10.6: local, relative to this file
   "/etc/mise/team.toml",                                      #            or absolute
 ]
@@ -144,7 +145,7 @@ include = [
 node = "22"   # this file's own entries override the included ones
 ```
 
-- **Forms:** `git::<url>//<path>.toml?ref=<ref>`, `oci::<registry>/<repo>[:tag|@sha256:<digest>]`, or a local `.toml` path (read on **every** load, never cached; an **error under paranoid mode**; skipped in safe mode); a string or an array. Since 2026.10.19 an include pinned to a commit SHA must check out **exactly** that commit (replace an annotated-tag object ID with the commit SHA).
+- **Forms:** `git::<url>//<path>.toml?ref=<ref>`, `oci::<registry>/<repo>[:tag|@sha256:<digest>]`, `zip::<http(s) url>` (2026.11.4 — a URL names no content, so a zip is refreshed like a branch, and **paranoid mode rejects it**: `a zip:: include cannot be pinned`), or a local `.toml` path (read on **every** load, never cached; an **error under paranoid mode**; skipped in safe mode); a string or an array. Since 2026.10.19 an include pinned to a commit SHA must check out **exactly** that commit (replace an annotated-tag object ID with the commit SHA).
 - **Precedence:** each fragment is merged **into** the including file (never a config file of its own) and ranks **just below it**; later entries override earlier ones. Hooks of the same type from both run (shared first); aliases merge per name; the including file's PATH entries come first.
 - **Allowed in a fragment:** `[tools]`, `[tool_alias]`, `[env]`, `[vars]`, `[hooks]`, `[alias]`, `[shell_alias]`, `[plugins]`, `[wrappers]`, `[_]`, **`[bootstrap]`** (2026.10.5 — merged key by key, the including file wins), `min_version` (enforced).
 - **Errors (not silent):** a nested `include`; `[settings]` and monorepo keys; `[tasks]`, `task_config`, `task_templates` (share tasks via [`task_config.includes`](task-definition.md#remote-tasks) instead); per-file sections like `[dotfiles]`, `[daemons]`, `redactions`.
@@ -163,11 +164,10 @@ mise settings add idiomatic_version_file_enable_tools dagger task lefthook
 
 Supported files include `.nvmrc`, `.node-version`, `package.json`, `.python-version`, `.python-versions`, `.ruby-version`, `Gemfile`, `.go-version`, `go.mod`, `rust-toolchain.toml`, `.java-version`, `.sdkmanrc`, `global.json`, `.terraform-version`, `.bun-version`, `.deno-version`.
 
-- **`go.mod` (2026.7.13+):** a `toolchain goX.Y.Z` directive is an exact pin. Since **2026.10.9** an exact `go X.Y.Z` line with no `toolchain` line is also used as the version (no warning). Reading a patch-less `go X.Y` minimum (and `CMakeLists.txt` `cmake_minimum_required`) as a version floor **warns and is removed in 2026.11.0** — use `toolchain goX.Y.Z`, `go X.Y.Z`, `.go-version`, or `mise.toml`. `idiomatic_version_file_ignore_minimum_versions` goes away at the same time.
+- **`go.mod`:** a `toolchain goX.Y.Z` directive is an exact pin, and an exact `go X.Y.Z` line with no `toolchain` line is also used (2026.10.9). A patch-less `go X.Y` minimum and `CMakeLists.txt` `cmake_minimum_required` are **no longer read** (removed 2026.11.0, along with the `idiomatic_version_file_ignore_minimum_versions` setting, which is now an unknown setting) — use `toolchain goX.Y.Z`, `go X.Y.Z`, `.go-version`, or `mise.toml`.
 - **`.nim-version`** is an idiomatic file for `nim` (2026.9.13).
 - **`go.work` (2026.9.12+):** with `go` enabled, an active `go.work`'s `toolchain` line selects the Go version and — as with the `go` command — member `go.mod` files are **ignored in workspace mode**. `GOWORK` (`auto`, `off`, or an absolute path) is honored.
 - **`.bazelversion` (2026.9.12+):** an idiomatic version file for `bazel` when enabled. Only **concrete releases** are read — `latest`, `last_green`, `8.x`, and commit hashes select nothing rather than failing.
-- **`idiomatic_version_file_ignore_minimum_versions`** (bool, default `false`) ignores idiomatic fields that declare only a *minimum* compatible version.
 - **Structured parsers (2026.7.15+):** registry `idiomatic_files` entries support `version_regex`, `version_json_path`, and `version_expr`, giving **in-process parsing with no plugin or shell execution** for 11 tools — Dagger, Task, chezmoi, CMake, Earthly, golangci-lint, GoReleaser, Lefthook, Pixi, pre-commit, Ruff (`dagger.json`, `Taskfile.yml`, `.chezmoiversion`, …).
 - **Disable individual files per tool (2026.7.17+)** with `tool:filename` pairs — e.g. keep `.nvmrc` selecting Node while stopping node from reading `devEngines.runtime` in `package.json`, with pnpm still reading it:
   ```bash
@@ -177,7 +177,7 @@ Supported files include `.nvmrc`, `.node-version`, `package.json`, `.python-vers
 
 ### Key Settings Reference
 
-mise ships **354 settings** (leaf count from `https://mise.jdx.dev/schema/mise.json` on 2026.10.25: 180 top-level keys, 40 of which are nested namespaces — note `mise settings --all` prints only the ~216 that resolve to a value, omitting unset optional ones). **Changed defaults/types:** `lockfile_mode` `merge` → **`generate`** (2026.10.19); `java.shorthand_vendor` `openjdk` → **`temurin`** (2026.10.5); `paranoid` bool → **bool or list** (2026.10.14); `env_file` path → **list** (2026.10.14); `fetch_remote_versions_cache` `"1h"` → **unset** (2026.10.11, see below). This is a representative subset — run `mise settings --all` (or `mise settings ls`) for the live list, and `mise settings set <key> <value>` / `mise settings get <key>` to manage them.
+mise ships **361 settings** (leaf count from `https://mise.jdx.dev/schema/mise.json` on 2026.11.5: 181 top-level keys, 40 of which are nested namespaces — note `mise settings --all` prints only the ones that resolve to a value, omitting unset optional ones). **Changed defaults/types:** `npm.provenance` new and **on** (2026.11.1, see [NPM Backend](dev-tools.md#npm-backend)); `skills.dir` `.claude/skills` → **unset** (2026.11.0, see [Agent Skills](dev-tools.md#packslip-man-pages-and-agent-skills)); `lockfile_mode` `merge` → **`generate`** (2026.10.19); `java.shorthand_vendor` `openjdk` → **`temurin`** (2026.10.5); `paranoid` bool → **bool or list** (2026.10.14); `env_file` path → **list** (2026.10.14); `fetch_remote_versions_cache` `"1h"` → **unset** (2026.10.11, see below). This is a representative subset — run `mise settings --all` (or `mise settings ls`) for the live list, and `mise settings set <key> <value>` / `mise settings get <key>` to manage them.
 
 ```toml
 [settings]
@@ -188,7 +188,7 @@ yes = false                 # Auto-answer prompts (MISE_YES) — global only
 safe = false                # Inert config-reader mode — global only
 
 # Task defaults (example values — task.output/timeout/timings are UNSET by default)
-task.output = "prefix"      # prefix|interleave|keep-order|replacing|timed|silent (unset → prefix if jobs>1)
+task.output = "prefix"      # prefix|interleave|keep-order|replacing|summary|timed|silent (unset → prefix if jobs>1)
 task.timeout = "10m"        # Default task timeout
 task.timings = true         # Show elapsed time
 task.quiet = false          # Suppress mise's own task chatter (replaces output = "quiet")
@@ -224,7 +224,7 @@ auto_install_disable_tools = []
 disable_backends = ["asdf"] # Disable backends (new installs only)
 disable_default_registry = false  # Only affects vfox and asdf shorthands
 enable_tools = []           # Allowlist (unset = all; empty = none)
-disable_tools = []
+disable_tools = []          # both match [tool_alias] names as well as full IDs (2026.11.4)
 pin = false                 # Default --pin for mise use
 lockfile = true             # Create + update lockfiles (unset = update existing ones only)
 lockfile_platforms = []     # Extra platforms to resolve in the lockfile
@@ -433,7 +433,9 @@ shorthand_vendor = "temurin"   # 2026.10.5 default (was openjdk)
 | `no_hooks` | bool | unset | Do not execute hooks from config files (matches `--no-hooks`) |
 | `task.quiet` | bool | `false` | Suppress mise's own output while executing tasks |
 | `upgrade.prune_after` | duration | `"24h"` | Grace period before versions replaced by `mise upgrade` are auto-pruned |
-| `idiomatic_version_file_ignore_minimum_versions` | bool | `false` | Ignore idiomatic version-file fields that only declare a **minimum** compatible version (now hidden; removed with the floors in 2026.11.0) |
+| `locked_require_checksum` | bool | unset (⇒ **on**, except with `lockfile_mode = "merge"`) | **2026.11.0.** `--locked` fails before downloading when a lock entry's URL for this platform has no checksum. `false` restores the old behavior; `true` also enforces it in merge mode. Deprecated with merge mode (warns 2027.10.0). See [Lockfiles](dev-tools.md#lockfiles-miselock) |
+| `status.show_env_ignore` | string[] | `[]` | **2026.11.5.** Names or shell globs hidden from the `status.show_env` line (`["GO*", "DENO_INSTALL_ROOT"]`); env `MISE_STATUS_MESSAGE_SHOW_ENV_IGNORE` (comma list) |
+| `task.lock_timeout` / `task.history` / `task.history_limit` / `task.logs` | — | — | **2026.11.0–11.3.** See [Global Task Settings](task-configuration.md#global-task-settings) |
 | `not_found_auto_install_registry` | bool | `false` | **2026.9.17.** Command-not-found installs an *unconfigured* registry tool when exactly one provides the command, adding it to global config |
 | `self_update.minimum_release_age` | string | unset (→ `minimum_release_age` → `24h`) | **2026.9.17.** Release-age delay for self-update, auto-update, and update notices. **Not** global-only |
 | `dotfiles.relative_symlinks` | bool | `false` | **2026.9.14.** Relative symlink targets for `symlink`/`symlink-each` |
@@ -475,6 +477,8 @@ Tasks automatically receive:
 | `MISE_TASK_FILE` | Full path to task script (for an inline TOML task: the config file that defines it) |
 | `MISE_ENV` | The active configuration environments |
 | `MISE_TASK_COLOR` | ANSI start sequence of the task's prefix colour (empty when colours are off or there's no prefix) |
+| `MISE_TASK_LOCKS` | Comma list of [locks](task-configuration.md#task-locks-lock) the task holds, inherited ones included (set only when it holds one; 2026.11.0) |
+| `MISE_RUN_AT_SOURCE` / `MISE_RUN_AT_REV` | Under [`mise run --at`](running-tasks.md#run-tasks-at-another-revision---at): the main checkout's path and the resolved full SHA (2026.11.2) |
 | `TRACEPARENT` / `TRACESTATE` | With [OpenTelemetry](task-tracing.md#task-tracing-with-opentelemetry-experimental) enabled — nested `mise run` and OTel-aware tools join the trace |
 
 ### CI/CD Integration
@@ -484,9 +488,9 @@ Tasks automatically receive:
 ```yaml
 - uses: actions/checkout@v7
 - id: mise
-  uses: jdx/mise-action@v5      # latest v5.2.5 (2026-10-31); v5 is the current major
+  uses: jdx/mise-action@v5      # latest v5.2.7 (2026-11-06); v5 is the current major
   with:
-    version: 2026.10.25   # pin mise (default: newest release ≥ minimum_release_age old)
+    version: 2026.11.5    # pin mise (default: newest release ≥ minimum_release_age old)
     minimum_release_age: 24h   # v5 DEFAULT; "0s" restores v4's "newest release" behavior
     # sha256: "…"         # verify the mise binary
     install: true         # run `mise install`

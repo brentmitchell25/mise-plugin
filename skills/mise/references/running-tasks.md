@@ -5,6 +5,10 @@
 - [Commands](#commands)
 - [Execution Flags](#execution-flags)
 - [Output Modes](#output-modes)
+- [Select Tasks by Tag](#select-tasks-by-tag)
+- [Run Reports (--report-file)](#run-reports---report-file)
+- [Run Tasks at Another Revision (--at)](#run-tasks-at-another-revision---at)
+- [Task History and Logs](#task-history-and-logs)
 - [mise watch Flags](#mise-watch-flags)
 - [Parallel Tasks and Wildcards](#parallel-tasks-and-wildcards)
 - [Default Task](#default-task)
@@ -20,6 +24,9 @@
 | `mise run` (no args) | Runs the `default` task; with no `default`, opens the interactive task selector (TTY only) |
 | `mise tasks` / `mise tasks ls` / `mise tasks list` | List all tasks (`-J/--json`, `-x/--extended`, `--no-header`); `list` alias since 2026.10.18. `mise tasks run` still works but is hidden from help (2026.10.5) |
 | `mise tasks --hidden` | Include hidden tasks |
+| `mise tasks ls --tag <TAG>` | Only tasks with any of the given tags (repeatable; 2026.11.2) |
+| `mise tasks history [TASK] [-s/--summary] [-J/--json]` | **2026.11.3.** Recent runs per task — see [Task History and Logs](#task-history-and-logs) |
+| `mise tasks log <TASK> [--path]` | **2026.11.3.** Print a task's last output (needs `task.logs`) |
 | `mise tasks --global` / `--no-global` | Filter by config scope (`--no-global` 2026.10.22; `-l/--local` is a deprecated alias — warns from 2027.1.0, removed 2027.7.0) |
 | `mise tasks -a` / `--all` | Entire monorepo, including siblings (`-a` since 2026.10.15) |
 | `mise tasks --name-only` | One name per line (fzf-friendly) |
@@ -44,7 +51,11 @@
 | `--jobs <N>` | `-j` | Parallel job limit (default 8; values below 1 treated as 1) |
 | `--force` | `-f` | Ignore source/output freshness |
 | `--dry-run` | `-n` | Preview without executing |
-| `--output MODE` | `-o` | prefix, interleave, keep-order, replacing, timed, quiet, silent |
+| `--output MODE` | `-o` | prefix, interleave, keep-order, replacing, summary, timed, quiet, silent |
+| `--tag <TAG>` | — | **2026.11.2.** Run tasks with any of these tags (repeatable) — see [Select Tasks by Tag](#select-tasks-by-tag) |
+| `--lock-timeout <DUR>` | — | **2026.11.0.** Fail a task that waits longer than this for its [`lock`](task-configuration.md#task-locks-lock) (setting `task.lock_timeout`) |
+| `--report-file <PATH>` | — | **2026.11.2.** Write a JSON run report (env `MISE_TASK_REPORT_FILE`) — see [Run Reports](#run-reports---report-file) |
+| `--at <REV>` / `--at-setup <CMD>` | — | **2026.11.2.** Run the tasks at another git revision in a temporary worktree — see [--at](#run-tasks-at-another-revision---at) |
 | `--raw` | `-r` | Direct stdin/stdout/stderr (forces `--jobs=1`, bypasses redactions) |
 | `--quiet` | `-q` | Suppress mise's extra output |
 | `--silent` | `-S` | Hide all output except errors |
@@ -62,7 +73,7 @@
 
 **Task output cache flags** (experimental): `--task-cache <read-write|read-only|write-only|off|local-only>` (default `read-write`, env `MISE_TASK_CACHE`), `--task-cache-explain`, `--task-cache-explain-json` (**requires `--dry-run`**), `--task-cache-stats` (conflicts with `--dry-run`).
 
-**Affected-set flags** (**not experimental since 2026.10.6**): `--affected`, `--affected-base <REV>`, `--affected-head <REV>`, `--affected-explain`, `--affected-json`, plus source selectors `--affected-committed` / `--affected-uncommitted` / `--affected-untracked` (env `MISE_AFFECTED_COMMITTED`/`_UNCOMMITTED`/`_UNTRACKED`, 2026.10.6) — see [Affected Tasks](monorepo.md#affected-tasks).
+**Affected-set flags** (**not experimental since 2026.10.6**): `--affected`, `--affected-base <REV>`, `--affected-head <REV>`, `--affected-explain`, `--affected-json`, plus source selectors `--affected-committed` / `--affected-uncommitted` / `--affected-untracked` (env `MISE_AFFECTED_COMMITTED`/`_UNCOMMITTED`/`_UNTRACKED`, 2026.10.6). Since **2026.11.3** `--affected` also works **outside a monorepo**, selecting tasks by their `sources` — see [Affected Tasks](monorepo.md#affected-tasks).
 
 **Secrets flags** (experimental, 2026.10.4; must precede the task name; refused in safe mode; also on `mise x`): `--secrets <KEY>[,<KEY>]` grants fnox keys for this invocation; `--secrets-all` grants every fnox secret with `env = true`/`"exec"` (never `env = false`).
 
@@ -98,11 +109,91 @@
 - `interleave` — Default when `jobs == 1`; print as output arrives
 - `keep-order` — Stream one task's output live; buffer others; print in definition order
 - `replacing` — Replace stdout on each new line (similar to `mise install`)
+- `summary` — **2026.11.2.** Nothing while a task runs; then one line (`[test] passed in 2.1s`) if it passed, or everything it printed, labelled, if it failed. A task stopped because a sibling failed prints `[name] cancelled`. Buffers the last 64 KiB per task. Good for agents and CI (`MISE_TASK_OUTPUT=summary`); give long-running tasks (dev servers) `output = "interleave"`, since they'd print nothing until exit. `raw`/`interactive` tasks still get the terminal.
 - `timed` — Show only stdout lines that took >1s
 - `quiet` — Print only task stdout/stderr, nothing from mise itself. **Deprecated (warns since 2026.9.3), removed 2027.9.3** — use `output = "interleave"` plus `task.quiet = true` (`MISE_TASK_QUIET`) or a per-task `quiet = true`, or `--output interleave --quiet`.
 - `silent` — Print nothing from tasks or mise
 
 Set via `--output`, `task.output`, `MISE_TASK_OUTPUT`, or the per-task `output` field. Style is **orthogonal** to verbosity — `MISE_TASK_OUTPUT=prefix --quiet` keeps prefixes while silencing mise's own messages.
+
+### Select Tasks by Tag
+
+Tag tasks with the [`tags`](task-configuration.md#metadata) field (2026.11.2), then select by tag instead of by name:
+
+```toml
+[tasks.clippy]
+tags = "lint"
+run = "cargo clippy"
+
+[tasks."test:e2e"]
+tags = ["test", "slow"]
+run = "./e2e/run"
+```
+
+```bash
+mise run --tag lint                 # every task tagged lint (no name ⇒ as if '**')
+mise run --tag lint --tag test      # ANY of the tags (union)
+mise run --tag slow 'test:*'        # name pattern AND tag (intersection)
+mise tasks ls --tag lint
+mise run --tag lint '//...:**'      # monorepo
+```
+
+- Dependencies of a selected task run whether or not they carry the tag.
+- A pattern with no task carrying the tag errors: `no task matching test:* has the tag lint`.
+- `--tag` must come **before** the task name — `mise run clippy --tag lint` passes `--tag lint` to the task.
+- Templates add their tags to the extending task's (template first).
+
+### Run Reports (`--report-file`)
+
+`mise run --report-file report.json` (or `MISE_TASK_REPORT_FILE`, 2026.11.2) writes a JSON summary when the run ends — on success, failure, Ctrl-C, or `--timeout`. It can't be combined with `--dry-run`, and nested `mise run` calls don't inherit the env var.
+
+| Key | Values |
+|-----|--------|
+| `version` | `1` (new fields may appear without a bump) |
+| `status` | `passed` \| `failed` \| `cancelled` \| `timed_out` |
+| `started_at`, `ended_at`, `duration_ms` | Run timing |
+| `tasks[]` | Every scheduled task (deps included) in start order, then never-started ones: `name`, `args` (redacted, URL credentials stripped), `status` (`passed` \| `failed` \| `cancelled` \| `skipped` \| `cached` \| `not_run`), `exit_code` (int or null), `duration_ms`, `started_at`, `ended_at` (null for `not_run`) |
+
+`skipped` means outputs were up to date or `skip_if` matched; `cached` means restored from the artifact cache; a parallel sibling stopped by another task's failure is `cancelled`.
+
+### Run Tasks at Another Revision (`--at`)
+
+`mise run --at <REV>` (2026.11.2) checks `REV` out into a temporary detached `git worktree`, runs the tasks there with **that revision's** config, tasks, and tools, and removes the worktree afterwards (also on failure, timeout, or Ctrl-C). Uncommitted changes in your checkout are not included. Submodules are initialized; git hooks don't run.
+
+```bash
+mise run --at main test
+mise run --at HEAD~1 bench > before.txt
+mise run --at main --at-setup 'cp -R "$MISE_RUN_AT_SOURCE/node_modules" .' test
+```
+
+- Ignored files (`node_modules/`, `target/`, `.env`) aren't in the worktree — prepare them with `--at-setup <CMD>` (requires `--at`). It runs in the worktree's copy of the directory you started in, outside the mise env, and isn't limited by `--timeout`; `--dry-run` prints it instead.
+- Both the setup command and the tasks get `MISE_RUN_AT_SOURCE` (path of your main checkout) and `MISE_RUN_AT_REV` (the resolved full SHA).
+- **Trust:** config at `REV` is trusted only if the main checkout is trusted — never through a prompt or `--yes`; paranoid mode always refuses `--at`. A nested `mise run --at` is refused. A `mise.toml` in a directory above the checkout (other than global config) doesn't apply.
+- Daemons the tasks start outlive the run; clean up with `mise daemons prune`.
+
+### Task History and Logs
+
+**History** (on by default, 2026.11.3): `mise run` records each task's start time, duration, redacted args, and result (`ok`/`failed`/`cached`/`skipped`/`cancelled`) per project (the monorepo root in a monorepo) under `$MISE_STATE_DIR/task-history/`, keeping the last `task.history_limit` (20) runs per task. Durations run from ready-to-start to end — env resolution and lock waits included, dependencies excluded. `--dry-run` and tasks with nothing to run (only `depends`) aren't recorded.
+
+```bash
+mise tasks history              # one line per run, oldest first
+mise tasks history test         # one task
+mise tasks history --summary    # Task, Runs, Failed, Median, Last, Last-status per task
+mise tasks history --summary --json | jq -r '.[] | "\(.task) \(.median_ms)"'
+```
+
+The summary median counts only runs that executed and succeeded. Turn history off with `task.history = false` or `task.history_limit = 0`.
+
+**Logs** (off by default): with `task.logs = true` (or `MISE_TASK_LOGS=1`) mise keeps each task's full redacted output from its last run (newest 4 MiB) in an owner-only file under `$MISE_STATE_DIR/task-logs/`. Each run replaces the previous log.
+
+```bash
+mise tasks log test             # print the last run's output
+mise tasks log test --path      # print the log file path (even if none exists yet)
+```
+
+- With logs on, a task that fails under `replacing`, `timed`, `silent`, or `summary` output prints `full output: <path>` after the error — a quiet run stays inspectable.
+- `raw`, `interactive`, and uncaptured interleave tasks produce no log (and delete the old one).
+- With logs off, `mise tasks log` errors: `task logs are off. Turn them on with mise settings set task.logs true or MISE_TASK_LOGS=1`.
 
 ### `mise watch` Flags
 

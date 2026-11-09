@@ -166,4 +166,11 @@ mise run --affected --affected-json build
 
 **Working-tree changes count (2026.10.6).** By default the change set is committed `base...head` **plus** staged, unstaged, and untracked (unignored) files — but only when head is the current checkout. Naming any of `--affected-committed`, `--affected-uncommitted`, `--affected-untracked` limits selection to those sources (they combine); the latter two error when head isn't the checkout.
 
+**Outside a monorepo (2026.11.3).** Without `monorepo_root`, `--affected` selects the matching tasks that a change affects: a changed file matches the task's `sources`, or the config file defining it or its `file` script changed. Tasks with **no `sources`** run whenever anything changed (nothing changed ⇒ nothing runs); global-config tasks are excluded. Dependencies of selected tasks still run, and the up-to-date check still applies (`--force` overrides). Symlinked source dirs are followed; a changed submodule counts as files under its path (list the submodule path itself for uninitialized submodules). `--affected-json` / `--affected-explain` reasons here: `changed-source`, `task-config`, `task-file`, `no-sources`, `argument-sources` (sources that use `{{ usage.* }}` — treated as always affected).
+
+```bash
+mise run --affected 'test:*'
+mise run --affected --affected-explain --dry-run 'test:*'
+```
+
 Defaults are `HEAD~1` / `HEAD`; `MISE_AFFECTED_BASE` / `MISE_AFFECTED_HEAD` override them; explicit CLI options win. **CI defaults:** GitHub Actions — base `origin/$GITHUB_BASE_REF`, head `$GITHUB_SHA`; GitLab MR — base `$CI_MERGE_REQUEST_DIFF_BASE_SHA` (or `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`), head `$CI_COMMIT_SHA`. Clone with enough history (`fetch-depth: 0`). `--affected-explain` reasons: `changed path`, `workspace-global path`, `lockfile change`, `depends on affected project`.

@@ -231,9 +231,22 @@ env = ["native"]
 # ~/.config/mise/miserc.local.toml — per machine, loads regardless of cwd
 env = ["work"]
 ```
-Explicitly set fields override the shared file at the same level; omitted fields inherit. `env` **replaces** the inherited list (`env = []` clears it). CLI `-E` and `MISE_ENV` still win over both.
+Explicitly set fields override the shared file at the same level; omitted fields inherit. `env` **replaces** the inherited list (`env = []` clears it) — **except** that a project file (found from the cwd) can't drop environments selected by `~/.config/mise/miserc.local.toml`, `~/.config/mise/miserc.toml`, or `/etc/mise/miserc.toml` (2026.11.0 security): those stay in their own order, ahead of the project's, so a project can't turn off a baseline like `paranoid = true` loaded from a global environment (global `["g"]` + project `["p"]` ⇒ `["g","p"]`; project `[]` ⇒ `["g"]`). CLI `-E` and `MISE_ENV` (and `MISE_ENV_CONF_D`) still **replace** everything for one command.
 
-Only **seven** settings are `.miserc`-settable:
+**Named environment sets (`[env_sets]`, 2026.11.1)** — name groups of environments in a shared miserc and select the name:
+```toml
+# miserc.toml
+[env_sets]
+server = ["server", "ssh", "pac"]
+workstation = ["workstation", "ssh", "pac", "raycast"]
+```
+```toml
+# ~/.config/mise/miserc.local.toml
+env = ["workstation"]          # loads workstation, ssh, pac, raycast — in that order
+```
+`-E workstation` and `MISE_ENV=workstation` expand the same way, and `{{ mise_env }}` holds the expanded list. A name that isn't a set is a plain environment (`env = ["workstation", "ci"]` works). Sets expand **one level** (a set can't contain a set); an environment listed twice keeps its first position. A project `.miserc.toml` can't define a set named like a system/global set or an environment those select. `mise bootstrap -E workstation --save-env` writes the selection into `miserc.local.toml` (see [bootstrap](bootstrap.md#bootstrap-configuration)).
+
+Only **eight** settings are `.miserc`-settable:
 
 | Key | Env var | Default |
 |-----|---------|---------|
@@ -243,7 +256,8 @@ Only **seven** settings are `.miserc`-settable:
 | `ignored_config_paths` | `MISE_IGNORED_CONFIG_PATHS` | `[]` — **2026.8.9+** supports relative entries and globs (incl. recursive `**`). Entries in `.miserc.toml` resolve against the declaring file; `MISE_IGNORED_CONFIG_PATHS` resolves against the invocation directory. |
 | `override_config_filenames` | `MISE_OVERRIDE_CONFIG_FILENAMES` | `[]` |
 | `override_tool_versions_filenames` | `MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES` | `[]` |
-| `env_conf_d` | `MISE_ENV_CONF_D` | unset — opt into environment-specific dotted `conf.d` filenames now (see [File Hierarchy](settings.md#file-hierarchy)) |
+| `env_conf_d` | `MISE_ENV_CONF_D` | unset — opt into environment-specific dotted `conf.d` filenames now (see [File Hierarchy](settings.md#file-hierarchy)). A project miserc's value applies to project directories only; `~/.config/mise/conf.d` and `/etc/mise/conf.d` follow the global/system miserc (2026.11.0) |
+| `env_sets` | — | unset — table of named environment lists (2026.11.1, above) |
 
 Its Tera context is limited. **Global/system miserc:** `env.*`, `config_root`, `cwd`, `xdg_*`, `mise_config_dir`, `system_brew_prefix`, all filters/tests, and all functions **except** `exec()`, `read_file()`, `read_json/yaml/toml()`; `vars`, `tools`, `mise_env`, `mise_bin`, and `mise_pid` are unavailable. 🔒 **Project `.miserc.toml` (2026.10.19 security):** `env` is empty and `get_env()` unavailable; only `if`/`elif`/`else`/`endif` statements; only the functions `arch`, `os`, `os_family`, `libc`, `avx2`, `num_cpus`, and a short filter/test whitelist; max **16 KiB**. A project file that breaks these limits (or fails to parse) is left unrendered **with a warning** (`not rendering the templates of the .miserc.toml in <dir>: …`); other render failures, such as an undefined variable, silently fall back to the raw content. Your own `~/.miserc.toml` can't ignore the global config. `.miserc.toml` never needs trust.
 

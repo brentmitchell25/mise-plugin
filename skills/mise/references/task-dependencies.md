@@ -31,7 +31,7 @@ run = "cargo build --release"
 # Skips if sources unchanged and outputs exist
 ```
 
-A task is fresh when output mtime is newer than the newest source. The task definition itself is an implicit source, missing declared outputs force a run, and relative entries resolve from the task `dir` (`..` allowed).
+A task is fresh when output mtime is newer than the newest source. The config file that defines the task is an implicit source (editing it — even to change a different task — makes the task stale), as is the script its `file` names, missing declared outputs force a run, and relative entries resolve from the task `dir` (`..` allowed).
 
 **Staleness also triggers when** (caching docs, 2026.10.x): the recorded list of source files (with each file's size and mtime) differs from the last successful run — so deleting, adding, or restoring an older copy re-runs it; any source has mtime 0 (1970-01-01); or, in content-hash mode, the outputs changed (same-size edits that restore the mtime are rehashed, 2026.10.17). A failed run records nothing. `--force` also re-runs the task's dependencies. A `sources` glob that matches nothing **warns** (`task build has sources defined but no matching files found`, 2026.10.5; the artifact cache adds `; artifact caching disabled`) and the task still runs.
 

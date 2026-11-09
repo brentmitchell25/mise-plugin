@@ -5,6 +5,7 @@
 - [All Task Fields](#all-task-fields)
 - [Structured run Array](#structured-run-array)
 - [Structured depends with Args/Env](#structured-depends-with-argsenv)
+- [Task Locks (lock)](#task-locks-lock)
 - [Task Templates (extends)](#task-templates-extends)
 - [Global Task Configuration](#global-task-configuration)
 - [Task-Scoped Secrets (Experimental)](#task-scoped-secrets-experimental)
@@ -29,6 +30,7 @@
 |-------|------|---------|-------------|
 | `description` | `string` | — | Task help text |
 | `alias` | `string \| string[]` | — | Alternative name(s) |
+| `tags` | `string \| string[]` | — | **2026.11.2.** Labels for selecting tasks with `mise run --tag` / `mise tasks ls --tag` (see [Select Tasks by Tag](running-tasks.md#select-tasks-by-tag)). Works in `#MISE tags=["test"]`. Shown by `mise tasks info` and `tasks ls --json`. |
 | `hide` | `bool` | `false` | Exclude from listings |
 
 #### Dependencies
@@ -58,13 +60,14 @@
 | `raw` | `bool` | `false` | Direct stdin/stdout connection. Takes an **exclusive lock per command** (nothing else runs alongside each of its commands; other tasks can run between them). Does **not** set jobs=1 — that is `mise run --raw`. Bypasses redactions and the artifact cache; not stopped by the whole-run timeout. |
 | `raw_args` | `bool` | `false` | Pass all args verbatim including `--help`/`-h` to underlying command |
 | `interactive` | `bool` | `false` | Exclusive lock held from the task's first to its last script command — every other task waits (verified; the schema description saying others "still run in parallel" is wrong). The lock is **released while a `{ task }`/`{ tasks }` run step executes**. Bypasses redactions and the artifact cache. |
+| `lock` | `bool \| string \| string[]` | — | **2026.11.0 (stable).** Named resources held while the task's commands run; other runs needing the same lock wait. See [Task Locks](#task-locks-lock). |
 | `skip_if` | `string` | — | **2026.10.10.** Shell command run **after `depends`, before `confirm`**, in the task's dir/shell/env/sandbox. **Exit 0 ⇒ the task is skipped** (prints `[x] skip_if condition met, skipping`) and counts as success; any other exit runs the task. Output discarded, no stdin, no `secrets`; shares the task `timeout` (failure to start / timeout ⇒ task fails). Tera-rendered (`usage.*` available); works in `#MISE` headers. `--force` bypasses it; `--dry-run` prints `skip_if: … (not checked: dry run)`. A skipped task does **not** invalidate dependents. |
 
 #### Output Control
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `output` | `"prefix" \| "interleave" \| "keep-order" \| "replacing" \| "timed" \| "quiet" \| "silent"` | inherits `task.output` | **Per-task output style** (2026.7.6+). Orthogonal to `quiet`/`silent`. |
+| `output` | `"prefix" \| "interleave" \| "keep-order" \| "replacing" \| "summary" \| "timed" \| "quiet" \| "silent"` | inherits `task.output` | **Per-task output style** (2026.7.6+; `summary` 2026.11.2). Orthogonal to `quiet`/`silent`. |
 | `quiet` | `bool` | `false` | Suppress mise's own chatter (echoed command). **No longer changes the output style.** |
 | `silent` | `bool \| "stdout" \| "stderr"` | `false` | Suppress all/specific task output |
 
@@ -154,6 +157,36 @@ depends = [{ task = "lint:*", optional = true }]
 
 Env vars passed to dependencies are scoped to that dependency only.
 
+### Task Locks (`lock`)
+
+`lock` (2026.11.0, not experimental) serializes tasks that share a resource — a test database, a simulator, a migration — across separate `mise run` invocations, projects, and git worktrees. It uses OS file locks under `$MISE_STATE_DIR/task-locks/`, released when the process dies.
+
+```toml
+[tasks.test]
+lock = "test-db"                       # machine-wide name, shared across projects — pick specific names
+run = "pytest"
+
+[tasks."e2e:ios"]
+lock = ["ios-simulator", "test-db"]    # several resources
+run = "./scripts/e2e-ios.sh"
+
+[tasks.migrate]
+lock = true                            # one run at a time across every worktree of this repo
+run = "./scripts/migrate.sh"
+```
+
+| Value | Meaning |
+|-------|---------|
+| `"name"` / `["a", "b"]` | Machine-wide named locks. Names must be non-empty and contain no commas. Several are taken in **sorted** order. |
+| `true` | A lock scoped to this task in this repo (`task:<hash>`), shared by all its worktrees |
+| `false` / `[]` | No lock — turns off a lock inherited from a template |
+
+- **When it's taken:** after `depends` finish and after mise decides the task must run — a task skipped by `skip_if`, fresh `sources`, or a cache restore never waits. Held until the task's last command ends, including `{ task = … }` run steps.
+- **Waiting:** the waiting task gives up its `--jobs` slot and prints `[t] waiting for lock L, held by <task> in <dir> (pid N, for 2.0s)`. Without a limit it waits forever; `mise run --lock-timeout 5m` or the `task.lock_timeout` setting fails it instead (`timed out after 5m waiting for lock L`). The task `timeout` clock starts once locks are held, but `mise tasks history` durations include the wait.
+- **Nesting:** a nested `mise run` or `{ task }` step inherits the parent's locks and may add only locks that sort **after** the inherited ones (otherwise it fails, preventing deadlock). Two tasks in one run that share a lock run one after the other.
+- **Terminal:** a locked task that isn't `interactive` shares the terminal, so its subtasks can't prompt (secrets prompts, interactive subtasks fail) — set `interactive = true` on the locked task if they must.
+- The task sees `MISE_TASK_LOCKS` (comma list, sorted, inherited locks included). `mise tasks info` and `mise run --dry-run` show locks. Works in `#MISE lock="test-db"` headers.
+
 ### Task Templates (`extends`)
 
 Reusable task definitions live in `[task_templates.*]`; tasks inherit them with `extends`. Template names may be namespaced with `:`.
@@ -181,7 +214,7 @@ run = "pytest --cov"       # overrides the template's run
 | **Override if set locally** | `dir`, `description`, `shell`, `timeout`, `silent`, `confirm`, `watch`, `daemons`, `file` (`run` is ignored when either side sets `file`) |
 | **Deep merge** (per key; task wins) | `tools`, `env`, `vars` |
 | **Concatenated** | `usage` — **template's flags first, then the task's** (2026.9.11+) |
-| **Compose / combine** | sandbox `deny_*` compose; `allow_*` and `pass_through_env` combine |
+| **Compose / combine** | sandbox `deny_*` compose; `allow_*`, `pass_through_env`, and `tags` combine (template's entries first, then the task's) |
 | **Not accepted on templates** | `hide`, `interactive`, `quiet`, `raw`, `raw_args` (warn as unknown — set per task); `extends` (no chaining); **`secrets` is a config error** |
 
 Templates from every loaded config (global and parent included) form **one namespace** — the highest-precedence definition of a name wins.
@@ -358,7 +391,11 @@ mise secrets ls [-J] [--no-header]          # KEY, ENV, FILE, SCOPES, TASKS, DES
 
 | Setting | Type | Default | Env Var | Description |
 |---------|------|---------|---------|-------------|
-| `task.output` | string | unset (→ `prefix` if jobs>1, else `interleave`) | `MISE_TASK_OUTPUT` | prefix, interleave, keep-order, replacing, timed, quiet (deprecated), silent |
+| `task.output` | string | unset (→ `prefix` if jobs>1, else `interleave`) | `MISE_TASK_OUTPUT` | prefix, interleave, keep-order, replacing, summary, timed, quiet (deprecated), silent |
+| `task.lock_timeout` | duration | unset (wait forever) | `MISE_TASK_LOCK_TIMEOUT` | How long a task waits for its [`lock`](#task-locks-lock) before failing (2026.11.0) |
+| `task.history` | bool | `true` | `MISE_TASK_HISTORY` | Record each run for `mise tasks history` (2026.11.3) |
+| `task.history_limit` | int | `20` | `MISE_TASK_HISTORY_LIMIT` | Runs kept per task; `0` stops recording |
+| `task.logs` | bool | `false` | `MISE_TASK_LOGS` | Keep each task's last output for `mise tasks log` (2026.11.3) |
 | `task.quiet` | bool | `false` | `MISE_TASK_QUIET` | Suppress mise's own task messages/prefix headers without hiding task output (replaces `output = "quiet"`) |
 | `raw` | bool | unset | `MISE_RAW` | Global `--raw` (forces jobs=1, bypasses redactions) |
 | `task.timeout` | duration | unset | `MISE_TASK_TIMEOUT` | Time limit for a **whole `mise run` invocation**; when a per-task (per-command) timeout also applies, the shorter wins |

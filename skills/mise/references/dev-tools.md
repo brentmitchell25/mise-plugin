@@ -21,7 +21,7 @@
 
 ### Backends Overview
 
-mise supports **20 backends** plus custom backend plugins (`mise backends ls` on 2026.10.25: aqua, asdf, cargo, conda, core, dotnet, forgejo, gem, github, gitlab, go, http, npm, **packslip**, **pypi**, s3, **spinel**, spm, ubi, vfox — `pipx` is an alias of `pypi`, not listed). The count is unchanged from 2026.9.12 because **pkgx was removed (2026.9.13)** and **spinel was added (2026.10.2, experimental)**. The registry assigns tools to backends by an **acceptance-tier** preference order — prefer the highest tier available for a given tool:
+mise supports **20 backends** plus custom backend plugins (`mise backends ls` on 2026.11.5: aqua, asdf, cargo, conda, core, dotnet, forgejo, gem, github, gitlab, go, http, npm, **packslip**, **pypi**, s3, **spinel**, spm, ubi, vfox — `pipx` is an alias of `pypi`, not listed). The count is unchanged from 2026.9.12 because **pkgx was removed (2026.9.13)** and **spinel was added (2026.10.2, experimental)**. The registry assigns tools to backends by an **acceptance-tier** preference order — prefer the highest tier available for a given tool:
 
 | Tier | Backends | When chosen |
 |------|----------|-------------|
@@ -206,7 +206,7 @@ Universal options supported by every backend:
 | `lazy_bins` | string \| string[] | **2026.9.0+.** Command names (no `/` or `\`) for lazy tools whose backend has no registry `bins` metadata. Single string accepted since 2026.10.2. |
 | `minimum_release_age` | string | Per-tool override of the supply-chain delay (e.g. `"1d"`, `"0s"` to disable). A **built-in 24h default applies to every backend when unset** (2026.10.15) — see [Lockfiles](#lockfiles-miselock). |
 | `install_before` | string | **Deprecated** — maps to `minimum_release_age` (**warning live since 2026.10.0**, removed 2027.10.0). |
-| `prerelease` | bool | Include prereleases — honored by **every backend except core `java`** |
+| `prerelease` | bool | Include prereleases — honored by **every backend except core `java`**. With `latest`, the newest installed version **including prereleases** is what runs (`mise x`, PATH, `which`, `where`, `bin-paths`; 2026.11.0) |
 | `platforms` / `platform` | table | Per-`<os>-<arch>` overrides (`platforms.linux-x64.url`); `platform` is an alias |
 
 > **Typed tool options in the JSON schema (2026.10.2).** Editors using `https://mise.jdx.dev/schema/mise.json` now validate and autocomplete options per backend prefix (github, gitlab, forgejo, ubi, http, s3, aqua, cargo, npm, pypi/pipx, gem, go, conda, spm, packslip, spinel, core python/java/rust/dotnet, `platforms.<os>-<arch>`, and `[tasks.*.tools]`) — existing configs with typos may start showing editor errors. Boolean options accept `true`/`false`, `"true"`/`"false"`, or `1`/`0`.
@@ -327,7 +327,7 @@ uv = "latest"
 "pypi:black" = { version = "latest", python = "3.12" }   # 2026.10.12: per-tool private CPython
 ```
 
-mise uses **uv**: with dependency locking it runs `uv sync --frozen`; version-only installs use `uv tool install` (passing `--python <mise python>` when mise manages Python, 2026.10.4 — a package whose `requires-python` excludes it now fails; override with `--python` in `uvx_args`), falling back to `pipx install` when uv is unavailable.
+mise uses **uv**: with dependency locking it runs `uv sync --frozen`; version-only installs use `uv tool install` (passing `--python <mise python>` when mise manages Python, 2026.10.4 — a package whose `requires-python` excludes it now fails; override with `--python` in `uvx_args`), falling back to `pipx install` when uv is unavailable. With **no Python interpreter at all** (2026.11.0) mise warns and installs from the version alone; `--locked` installs and tools with a `python = …` option still fail.
 
 > **`pipx:` is the same backend under its old name** (the `pipx.html` doc page is now just a redirect to `pypi.html#compatibility-with-pipx`). It keeps its **own tool identity** (`pipx-black` install dir, lock sidecars, and entries), and `pipx.registry_url`/`pipx.uvx` are hidden "older name for `pypi.*`" settings.
 
@@ -446,6 +446,8 @@ strip_components = 1
 linux-x64 = { asset_pattern = "gh_*_linux_x64.tar.gz" }
 macos-arm64 = { asset_pattern = "gh_*_macOS_arm64.tar.gz" }
 ```
+
+**Asset autodetection** skips `.deb`, `.rpm`, `.whl`, and `.gem` assets (the last two since 2026.11.3); an explicit `asset_pattern` can still select them. `asset_pattern` is a **glob** — one that looks like a regex and matches nothing errors with a hint to use `matching_regex`.
 
 **Tool options:** `asset_pattern` (must match the **whole** asset name; shortest match wins), `additional_asset_patterns`, `matching`, `matching_regex`, `version_prefix` (default: strip a leading `v`, and on GitHub also a repo-name prefix like `tectonic@0.15.0`; `version_prefix = ""` keeps tags verbatim), `version_regex` (2026.10.20 — a Rust regex the **raw tag** must match to be listed, resolved, or installed; it matches anywhere, so anchor it: `version_regex = '^(v\d+\.\d+\.\d+|nightly)$'`; with `version_prefix`, a tag needs both; an invalid pattern is a hard error), `platforms` (per-platform `asset_pattern`/`additional_asset_patterns`/`url`/`checksum`/`size`/`bin`/`bin_path`/…), `strip_components`, `bin`, `rename_exe`, `bin_path`, `filter_bins`, `format` (force archive type: `tar.gz`, `zip`, `7z`, `raw`, …), `checksum`, `size`, `no_app`, `api_url`, `prerelease`, `github_attestations`, and **`slsa_signer_identity`** (Tera — `{{ version }}`) + **`slsa_signer_issuer`** (2026.9.16; without both, SLSA is skipped; with `locked_verify_provenance` a missing signer is an error).
 
@@ -641,6 +643,19 @@ Since **2026.7.18**, installs record the effective `features`/`default-features`
 **Lifecycle-script defaults:** npm passes `--ignore-scripts=true` (dropped when `allow_builds` is used with npm ≥11.16.0); bun runs no dependency scripts unless `bun_args = "--trust"`; aube/pnpm need `allow_builds`.
 
 **Setting `npm.shell_out`** (default `false`) routes metadata lookups and installs through the npm CLI instead of the built-in aube implementation.
+
+**Provenance verification (on by default since 2026.11.1).** `npm.provenance` (default `true`, env `MISE_NPM_PROVENANCE`) verifies the Sigstore provenance of the tool's **own** package (not its dependencies) against the sha512 integrity the install locks. Provenance from GitHub Actions and gitlab.com CI/CD is accepted (self-hosted GitLab is not).
+
+- Only the embedded aube installer verifies; any other `npm.package_manager` installs unchecked.
+- A package that publishes no provenance (or a private registry that serves none) installs as before — **unless `mise.lock` pins a provenance repository** for it, in which case the install fails. A later version published from a **different** repository, or one that stops publishing provenance, also fails.
+- `mise install` (not `mise lock`) records the pin as `provenance = { repository = "github.com/owner/repo" }` on the tool entry, and only into an existing revision-4 `mise.lock` (see [Lockfiles](#lockfiles-miselock)). An already-installed version isn't re-verified — reinstall to check it.
+- Verification fetches Sigstore trust roots; on a network that blocks them, installs of provenance-publishing packages fail until you opt out. `provenance_api_failures_fatal` covers the attestation lookups.
+- The `paranoid` category `provenance` turns verification on even when `npm.provenance = false`, and makes unverifiable installs (non-aube package managers, `checksum`-pinned archives) **fail** instead of going unchecked.
+
+```toml
+[settings.npm]
+provenance = false   # opt out (or MISE_NPM_PROVENANCE=0)
+```
 
 npm tools resolved from a `mise.lock` pin are auto-trusted through the low-download gate — reproducing an existing lockfile no longer needs `allow_low_downloads`.
 
@@ -941,15 +956,17 @@ mise completion zsh --tool hk              # print without installing
 
 ```bash
 mise skills ls [--json]                    # skills the active tools declare
-mise skills sync --dir .agents/skills      # link them where your agent looks (--prune, -g/--global)
+mise skills sync                           # link them where your agent looks (--dir, --prune, -g/--global)
 ```
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `skills.fetch` | `true` | Fetch the agent skills a tool's packslip declares when installing it |
 | `skills.auto_sync` | `false` | Link active tools' skills into the project after `mise install`, `mise use`, and `mise upgrade` (sync also writes `.mise-skills.json` and a `.git/info/exclude` block) |
-| `skills.dir` | `.claude/skills` | Where `mise skills sync` links skills — under the project root, or under `$HOME` with `--global` |
+| `skills.dir` | unset | Where `mise skills sync` links skills — under the project root, or under `$HOME` with `--global`. **Unset (2026.11.0):** use `.agents/skills` if it exists, else an existing `.claude/skills`; if neither exists, create `.agents/skills` plus a `.claude/skills` symlink to it (existing `.claude/skills` projects are unchanged) |
 | `skills.prune` | `false` | Remove links mise made for skills that are no longer active when syncing |
+
+**Global tools (2026.11.0):** with `skills.auto_sync`, `mise use -g` links a global tool's skills under `$HOME`, and `mise install`/`upgrade` keep those home links current. A project directory gets only the tools its own config declares — global-only tools link only under home (2026.11.2; stale project links stay until `mise skills sync --prune`). `mise skills sync --global` links only tools from global and system config.
 
 > If a completion needs the publisher's generator command, mise runs it **on demand** and caches successful output per installed version/executable/shell. `packslip.exec` controls resource generation **at install time**; setting it to `false` does **not** disable on-demand completion generation.
 
@@ -964,7 +981,7 @@ mise skills sync --dir .agents/skills      # link them where your agent looks (-
 **What gets locked:** config `[tools]`, **task tools** (including task templates and included task files), and tool stubs. `.tool-versions` tools are **not** locked. `conf.d` files share the parent directory's lockfile; idiomatic files use the nearest `mise.toml`'s lockfile. `lockfile = false` together with `locked = true` fails as soon as a tool must actually be installed (`locked mode requires lockfile to be enabled`); `mise ls` and already-installed tools still work. **Default platforms for a new lockfile:** `linux-x64`, `linux-x64-musl`, `linux-arm64`, `linux-arm64-musl`, `macos-x64`, `macos-arm64`, `windows-x64`, plus the current platform (`--platform` qualifiers: `gnu`, `glibc`, `musl`, `msvc`, `baseline`, `musl-baseline`; Bun adds `-baseline` on CPUs without AVX2).
 
 ```toml
-lockfile_version = 3
+lockfile_version = 4
 
 [[tools.node]]
 version = "20.11.0"
@@ -983,10 +1000,14 @@ options = { exe = "rg" }
 
 The writer uses a **quoted** platform key — `[tools.node."platforms.linux-x64"]` — and omits `size`.
 
-Tool entry fields: `version` (required), `backend`, `specifiers` (the original requests that resolved here), `options` (backend-specific artifact identity), `platforms`, plus `aube` / `uv` (revision 2 — sidecar path + digest for npm / Python dependency graphs). A top-level `tool-stubs = [...]` array lists locked [tool stubs](#tool-stubs) (2026.9.13); top-level `[conda-packages.<platform>]` holds conda dependency artifacts.
+Tool entry fields: `version` (required), `backend`, `specifiers` (the original requests that resolved here), `options` (backend-specific artifact identity), `platforms`, plus `aube` / `uv` (revision 2 — sidecar path + digest for npm / Python dependency graphs) and `provenance = { repository = "github.com/owner/repo" }` (revision 4 — the source repository an npm package's [provenance](#npm-backend) must come from; written by `mise install`, not `mise lock`, and sometimes as a `[tools."npm:x".provenance]` sub-table). The tool-level `provenance` table is unrelated to the platform-level `provenance` string below. A top-level `tool-stubs = [...]` array lists locked [tool stubs](#tool-stubs) (2026.9.13); top-level `[conda-packages.<platform>]` holds conda dependency artifacts.
 Platform sub-fields: `checksum` (SHA256 or Blake3), `url`, `url_api` (authenticated asset requests), `provenance` (which method verified it — SLSA / cosign / minisign / GitHub attestations), `signer` / `attested_by` (packslip identity), **`repository_ids = { repository = "<id>" }`** (revision 3 — the forge repository ID packslip pins), `checksum_source = "mise-versions"`, `install = "source"`, `additional_artifacts`, `conda_deps`, `size` (**legacy, read-only now**). `provenance_verified` is kept on unchanged artifacts but never read. Full field reference: `https://mise.jdx.dev/dev-tools/mise-lock-reference.html`.
 
 **Backends exempt from strict URL-locking** (`--locked` does not require a resolved URL): `asdf`, `cargo`, `dotnet`, `gem`, `go`, `npm`, `pypi`/`pipx`, `spinel`, `spm`, `ubi`, vfox **backend** plugins, `core:dotnet`, `core:rust`, `core:swift`. URL-recording — `aqua`, `github`, `gitlab`, `forgejo`, `http`, `s3`, `packslip`, `conda` (URL + checksum + deps), the core archive tools (bun, deno, elixir, erlang, go, java, node, python, ruby, zig), and vfox **tool** plugins — must have a resolved URL for the current platform. spm records the bundle URL and checksum. Tool stubs follow the same rules via the project `mise.lock`.
+
+**`--locked` requires checksums (2026.11.0, breaking for hand-written or old lockfiles).** In locked mode, a lock entry whose URL for the current platform (including additional GitHub release assets) has no checksum fails **before downloading**: `No lockfile checksum found … (--locked mode)` — hint: `Run mise lock to record checksums, or set locked_require_checksum = false`. `mise lock` fills missing checksums (downloading and hashing the artifact if the release publishes none). Backends that don't lock URLs (cargo, go, …) are unaffected; `lockfile_mode = "merge"` is exempt unless `locked_require_checksum = true`.
+
+**Safe mode ignores lockfile URLs (2026.11.0).** Under `MISE_SAFE=1` a project `mise.lock` can't choose download URLs, even in a trusted project: mise downloads from the backend's own release source and still checks the locked checksum, and `--locked` accepts entries that have a checksum but no URL. `MISE_SAFE=1 MISE_LOCKED=1 mise install` works for node, python, and go (2026.11.2).
 
 **Lockfile security (2026.10.19):** a `mise.lock` checksum is now **enforced** for erlang, npm, spm, and http; an **untrusted** lockfile can't switch a backend, add inline options, or supply download URLs (until its config is trusted it only pins versions and checksums); `mise lock` refuses URLs with credential-like query parameters; version strings containing template syntax are refused. A monorepo root at `.config/mise.toml` writes `.config/mise.lock` (2026.10.18). `mise lock` warns when a named platform has no build (2026.10.12).
 
@@ -1038,7 +1059,7 @@ Per-config lockfiles pair with their config: `mise.toml`→`mise.lock`, `mise.te
 
 For the current platform, `mise lock` **downloads the artifact and performs full cryptographic verification at lock time**, so the entry is backed by real verification rather than registry metadata. Cross-platform entries record detected provenance without verifying. The old `github_attestations = "unavailable"` marker is **no longer written** and is ignored on read — mise probes again.
 
-Settings: `lockfile` (unset ⇒ update existing lockfiles, never create new ones), `locked = true` (require lockfile-resolved URLs; blocks API calls — good for CI), `locked_verify_provenance` (default `false`; auto-on with `paranoid`/`paranoid = ["provenance"]`), `lockfile_platforms`, `lockfile_mode` (**`generate`** default since 2026.10.19 \| `merge`, deprecated 2026.10.24), `lockfile_auto_prune` (default `true`), `locked_scopes` (default `["global","project","system"]`, global-only; `[tool_config] locked` applies even when `locked_scopes` excludes the scope).
+Settings: `lockfile` (unset ⇒ update existing lockfiles, never create new ones), `locked = true` (require lockfile-resolved URLs; blocks API calls — good for CI), `locked_require_checksum` (unset ⇒ on, except in merge mode; 2026.11.0, deprecated along with merge mode — warns from 2027.10.0), `locked_verify_provenance` (default `false`; auto-on with `paranoid`/`paranoid = ["provenance"]`), `lockfile_platforms`, `lockfile_mode` (**`generate`** default since 2026.10.19 \| `merge`, deprecated 2026.10.24), `lockfile_auto_prune` (default `true`), `locked_scopes` (default `["global","project","system"]`, global-only; `[tool_config] locked` applies even when `locked_scopes` excludes the scope).
 
 **Lockfile revisions** (`lockfile_version`):
 
@@ -1047,9 +1068,10 @@ Settings: `lockfile` (unset ⇒ update existing lockfiles, never create new ones
 | 0 | — | Unversioned legacy format |
 | 1 | 2026.8.11 | Binds each original request to the entry it resolved, so `"1"` and `"1.0.0"` can lock different versions |
 | 2 | 2026.9.7 | npm/pypi dependency-graph sidecars (see below) |
-| **3** | **2026.9.16** | `repository_ids` — packslip pins by forge repository ID, so a **renamed** (2026.9.16) or **transferred** (2026.10.2) repo keeps installing with a one-time warning, while a *different* repo re-created under the same name is refused |
+| 3 | 2026.9.16 | `repository_ids` — packslip pins by forge repository ID, so a **renamed** (2026.9.16) or **transferred** (2026.10.2) repo keeps installing with a one-time warning, while a *different* repo re-created under the same name is refused |
+| **4** | **2026.11.1** | Tool-entry `provenance = { repository = … }` — the npm provenance repository pin |
 
-🔴 **New and empty lockfiles are written as revision 3, which older mise rejects** — upgrade collaborators and CI to **2026.9.16+** before committing one. Existing lockfiles keep their revision during ordinary `lock`/`install`/`upgrade`; run **`mise lock --upgrade`** (transactional; rolls back on failure; takes no tool arguments) to migrate. Since 2026.9.17 mise warns when a lockfile's format was superseded more than 6 months ago — revision 0 after 2027-02-23, revision 1 after 2027-03-13, revision 2 after 2027-03-27.
+🔴 **New and empty lockfiles are written as revision 4, which mise older than 2026.11.1 rejects** (`unsupported lockfile version 4`) — upgrade collaborators and CI before committing one. Existing lockfiles keep their revision during ordinary `lock`/`install`/`upgrade` (below revision 4 mise omits the provenance pin and warns); run **`mise lock --upgrade`** (transactional; rolls back on failure; takes no tool arguments) to migrate — to add pins to an older lockfile, `mise lock --upgrade` then `mise install --force`. Since 2026.9.17 mise warns when a lockfile's format was superseded more than 6 months ago — revision 0 after 2027-02-23, revision 1 after 2027-03-13, revision 2 after 2027-03-27, revision 3 after 2027-05-03.
 
 #### Dependency-Graph Sidecars (revision 2+, 2026.9.7)
 

@@ -217,7 +217,7 @@ file = "git::https://github.com/org/repo.git//path?ref=main"
 
 Format: `git::<protocol>://<url>//<path>?ref=<ref>` — ref is optional (defaults to repo's default branch). `https`, `http`, and `ssh` protocols work; Azure DevOps `_git` and `git@ssh.dev.azure.com:v3/…` forms are accepted without `.git`. The `//path` must be relative with no `.`/`..` segments.
 
-> 🔴 **Experimental gate added (2026.10.5, breaking).** `git::` task files (`file = "git::…"`) and `git::`/`oci::` entries in `task_config.includes` now **require `experimental = true`**. Without it, `mise run` errors with ``loading task `remote` from a `git::` file is experimental``, and includes are skipped with ``WARN skipping task include … from an `oci::` source is experimental``; inspection commands (`tasks ls|info|deps|validate`) warn and don't fetch. Plain HTTP `file = "https://…"` is **not** gated.
+> 🔴 **Experimental gate added (2026.10.5, breaking).** `git::` task files (`file = "git::…"`) and `git::`/`oci::`/`zip::` entries in `task_config.includes` now **require `experimental = true`**. Without it, `mise run` errors with ``loading task `remote` from a `git::` file is experimental``, and includes are skipped with ``WARN skipping task include … from an `oci::` source is experimental``; inspection commands (`tasks ls|info|deps|validate`) warn and don't fetch. Plain HTTP `file = "https://…"` is **not** gated.
 
 Remote files cached in `$MISE_CACHE_DIR` (git in `$MISE_CACHE_DIR/remote-git-tasks-cache`, OCI catalogs in `$MISE_CACHE_DIR/remote-oci-tasks-cache`). Clear with `mise cache clear`. Disable cache with `MISE_TASK_REMOTE_NO_CACHE=true` or `--no-cache` (which, since 2026.9.16, also re-clones `git::` includes and refetches remote dependency tasks).
 
@@ -251,5 +251,13 @@ oras push ghcr.io/myorg/shared-tasks:1.0.0 build.toml scripts/deploy   # publish
 - Credentials come from `docker login` / `podman login`, else anonymous. Loopback registries use plain HTTP; others need `oci.insecure_registries`.
 - Cached in `$MISE_CACHE_DIR/remote-oci-tasks-cache` **per reference — a moved tag is not re-pulled**. Refresh with a new tag/digest, by deleting the dir, or with `MISE_TASK_REMOTE_NO_CACHE=true`.
 - Not supported: single-file `oci::` includes and a `//subpath` selector (the artifact is always a directory).
+
+**Zip task catalogs (2026.11.4; experimental)** — a task directory published as a zip archive over http(s):
+```toml
+[task_config]
+includes = ["zip::https://example.com/shared-tasks-1.0.0.zip"]
+```
+- Unpacked and loaded like an OCI include: executable file tasks and `.toml` task files are discovered, and non-TOML files starting with a shebang are made executable.
+- mise reuses its cached download for the same URL, so **put the version in the URL**; `task.remote_no_cache` re-downloads on every run. Without `experimental = true` it is skipped with ``including tasks from a `zip::` source is experimental``.
 
 > `includes` entries are Tera-rendered (`config_root`, `env`, `vars`). The top-level [`include`](settings.md#remote-config-includes-include) key is a different feature and **cannot carry tasks** — share tasks through `task_config.includes`.

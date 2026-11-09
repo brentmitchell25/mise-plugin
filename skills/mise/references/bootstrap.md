@@ -16,7 +16,10 @@
 mise bootstrap                    # run the full setup
 mise bootstrap -n                 # --dry-run: preview without changing anything
 mise bootstrap -y                 # --yes: skip confirmation prompts
-mise bootstrap --update           # refresh package-manager metadata (and repos) first
+mise bootstrap --update           # refresh package-manager metadata (and repos) first; without
+                                   # --from/--adopt it also fast-forwards a git-checkout ~/.config/mise
+                                   # and re-runs (2026.11.0; --dry-run prints `git pull --ff-only`;
+                                   # a diverged checkout stops the run)
 mise bootstrap --force-dotfiles   # overwrite conflicting whole-file dotfiles
 mise bootstrap --prompt-secrets   # prompt for [bootstrap.secrets] inputs
 mise bootstrap --only packages,dotfiles
@@ -29,6 +32,8 @@ mise bootstrap --upgrade           # 2026.10.11: also upgrade packages/tools
 mise bootstrap --prune-dotfiles    # 2026.10.15: remove orphaned dotfile-group files
 mise bootstrap --prompt-vars       # 2026.10.6: ask for unanswered [vars] prompts
 mise bootstrap --take-remote-all   # resolve all dotfile-history conflicts with the remote side
+mise bootstrap --from <url> -E workstation --save-env   # 2026.11.1: write the -E / MISE_ENV selection
+                                   # (env_sets names allowed) into miserc.local.toml
 mise bootstrap --from https://github.com/you/dotfiles.git --from-dir ~/.dotfiles --config-dir .config/mise
                                    # 2026.10.21: link ~/.config/mise to a dir inside the checkout
                                    # (requires --from; path stays inside the checkout; the existing
@@ -517,7 +522,7 @@ profile = "work"
 default = true
 ```
 
-**Entry fields:** `source` · `content` · `mode` (`symlink` \| `symlink-each` \| `copy` \| `template` \| `track` \| **`track-local`** \| **`absent`**) · `exclude` · `manifest` (`"git"`) · `block` · `line` · `position` (`append` \| `prepend`) · `template` (`"tera"`) · **`merge`** (`true` \| `"missing"`) · `comment` · `encrypt` (track only) · `variants` (each `{ os?, profile?, default?, target?, machine? }`; `target` is a Tera template since 2026.10.18) · **`permissions`** (octal string `"0600"`) · **`remove_empty`** (template mode) · **`relative`** (symlink modes) · **`dot_prefix`** (directory source + `symlink-each`/`copy`) · **`include`** / **`allow_plaintext`** (track only) · `enabled` · `autosave`. A template entry with no source falls back to `<path>.tera` (2026.10.12).
+**Entry fields:** `source` · `content` · `mode` (`symlink` \| `symlink-each` \| `copy` \| `template` \| `track` \| **`track-local`** \| **`absent`**) · `exclude` · `manifest` (`"git"`) · `block` · `line` · `position` (`append` \| `prepend`) · `template` (`"tera"`) · **`merge`** (`true` \| `"missing"`) · `comment` · `encrypt` (track only) · `variants` (each `{ os?, profile?, default?, target?, machine? }`; `target` is a Tera template since 2026.10.18) · **`permissions`** (octal string `"0600"`) · **`remove_empty`** (template mode) · **`relative`** (symlink modes) · **`dot_prefix`** (directory source + `symlink-each`/`copy`) · **`include`** / **`allow_plaintext`** (track only) · `enabled` · `autosave` · **`depends`** (2026.11.0, below). A template entry with no source falls back to `<path>.tera` (2026.10.12).
 
 | New field (2026.9.13–9.16) | Rules |
 |----------------------------|-------|
@@ -530,6 +535,22 @@ default = true
 | `dot_prefix` | Stow `--dotfiles`: source components `dot-<name>` deploy as `.<name>`. `exclude`/`manifest` match **source** names. A `dot-bashrc` + `.bashrc` collision fails. `mise dot add` refuses to capture into a `dot_prefix` entry (groups accept). |
 | `include` (track) | Only matching paths are captured; `include = []` selects nothing. Selects credential-named files too (plaintext unless `encrypt = true`). New checkpoints use history schema v2, so **upgrade every machine** sharing the history first. |
 | `allow_plaintext` (track) | Written by `mise dot track --allow-plaintext` — lets a directly tracked credential-named file be stored in plaintext. `--yes` does **not** imply it. |
+
+**Ordering with `depends` (2026.11.0).** `mise dot apply` normally plans every entry before writing any, so a template or `fnox` entry can't read a file the same apply creates. `depends` lists dotfile **groups** (by name) and **whole-file entries** (by target path) to write first; mise applies in rounds.
+```toml
+[dotfile_groups.secrets]
+root = "secrets"
+mode = "copy"
+target = "~/.config/fnox"
+
+[dotfiles]
+"~/.workrc" = { mode = "fnox", depends = ["secrets"] }
+"~/.npmrc" = { mode = "fnox", depends = ["~/.ssh/encryption_ed25519"] }
+"~/.ssh/encryption_ed25519" = { mode = "template", source = "ssh/encryption_ed25519.tera" }
+```
+- A group's `depends` also applies to its entries. A dependency the apply leaves out (e.g. not named in `mise dot apply <target>`) counts as already applied.
+- An unknown name or a cycle is an error. If a round fails, earlier rounds stay written and mise lists what wasn't applied.
+- `--dry-run` lists dependent entries without rendering them; the confirmation prompt appears once per round. Edits and `track` entries take no `depends`.
 
 **Pattern matching (2026.9.15):** a leading `/` anchors a pattern to the entry root like `.gitignore` (`"/cache"` = top level only); `**` crosses directories; in `include` patterns `*` **never** crosses `/`. In `exclude` patterns containing `/`, `*` still crosses `/` but **warns** (deprecated 2026.9.13, removal **2027.9.13**) — write `**` instead.
 
@@ -613,6 +634,7 @@ root = "common"
 The edited file must be inside the group's target (no `..`); a relative `source` starts at the group root; a whole-file-only key such as `mode` on an edit makes mise **ignore the whole group** with a warning. Deselecting the group leaves what the edit wrote — run `mise dot unapply <path>` while the group is still selected to remove a block or line.
 
 - Group names match `^[A-Za-z0-9_.-]+$`; a more-local config with the same group name **replaces** the whole group table.
+- A group's `depends` (2026.11.0) names groups and entry targets to write first — see [Ordering with `depends`](#declarative-dotfiles-dotfiles).
 - Two selected groups may not deploy the same file, nor may one link a directory whole while another places files in it — the conflict is reported before anything is written.
 - Entries without `source` find it under the group root at the same relative path; entries without `mode` deploy like the group; walking entries inherit `dot_prefix`, `manifest`, and slash-less `exclude`s. Every entry must lie inside the group's `target`.
 - **Deselecting or deleting a group leaves its files** — mise records deployments under `$MISE_STATE_DIR/dotfiles/groups` and `mise dot status` lists them as **`orphaned`**. Clean up with `mise dot apply --prune` (every group; asks unless `--yes`) or `mise dot unapply --group <name>`. Both only remove links still pointing at the source / copies still holding what mise wrote (`--force` for changed copies), and never remove through linked dirs or inside `dotfiles.root`.
@@ -634,7 +656,12 @@ mise dot paths [--noisy]                      # what history tracks, and under w
 mise dot track --dry-run ~/.config/app        # 2026.9.13: preview files/size/what is left out
 mise dot paths --preview ~/.config/app        # same preview; warns above 5,000 files or 256 MiB
 mise dot track --allow-plaintext ~/.netrc     # 2026.9.16: store a credential-named file unencrypted
+mise dot files ~/.config                      # 2026.11.5: each file's state — tracked, excluded,
+                                              # omitted, untracked, partial, local (-r/--recursive,
+                                              # --tracked, --untracked, -J/--json)
 ```
+
+`track`/`untrack`/`add`/`edit` accept relative paths (home paths are stored as `~/…`, 2026.11.5). `mise dot sync` merges exclusions added on two machines (2026.11.4); removals and `!glob` changes on both sides still conflict.
 
 **Credential filtering is by filename, not contents:** `.netrc`, `*.age`, `*.key`, `*.pem`, `*.gpg`, `*.kdbx`, `id_*` (including `id_ed25519.pub`), `*token*`, `*secret*`, `credentials*`, `oauth*`, and under the mise config dir `github_tokens.toml`, `hosts.yml`, `age.txt`. `*.local.toml` is **always** omitted, even with encryption. `mise dot paths` lists omissions with reasons.
 
