@@ -6,7 +6,7 @@
 
 > The usage-field rule in `SKILL.md` applies to every task example in this file.
 
-Dates below come from mise's own `deprecated_at!` macros and `settings.toml` (`deprecated_warn_at` / `deprecated_remove_at`) at v2026.11.5 (every date re-verified) — the docs disagree with the source in places, and the source wins.
+Dates below come from mise's own `deprecated_at!` macros and `settings.toml` (`deprecated_warn_at` / `deprecated_remove_at`) at v2026.11.13 (every date re-verified by diffing the `deprecated_at!` calls and `settings.toml` against v2026.11.5 — two new entries, no changed dates) — the docs disagree with the source in places, and the source wins.
 
 | Removal | What | Migrate to |
 |---------|------|------------|
@@ -31,17 +31,17 @@ Dates below come from mise's own `deprecated_at!` macros and `settings.toml` (`d
 | **2027.10.0** | `install_before` (**warning live since 2026.10.0**); `lockfile_mode = "merge"` / `MISE_LOCKFILE_MODE=merge` (deprecated 2026.10.24, warns from 2027.4.0). `locked_require_checksum` **starts warning** here | `minimum_release_age`; delete the setting (default `generate`) |
 | **2027.10.4** | Bootstrap part aliases `shell`, `defaults`, `launchd`, `systemd` in `--only`/`--skip`; commands `mise bootstrap launchd`, `mise bootstrap systemd`, `mise bootstrap macos-defaults`; `mise direnv` / `use mise` (warn since **2026.10.4**) | `mise-shell-activate`, `macos-defaults`, `macos-launchd-agents`, `linux-systemd-units`; `mise bootstrap macos launchd-agents`, `linux systemd-units`, `macos defaults`; `mise activate` + `[env]` |
 | **2027.10.5** | No-op settings `task.cache.stats_report`, `sops.age_recipients`, `plugin_autoupdate_last_check_duration` (warn since **2026.10.5**) | Remove them (`--task-cache-stats`; `mise set --age-encrypt --age-recipient`) |
-| **2027.11.0** | `credential_command` legacy single positional argument (the hostname arg); `*.default_packages_file`; `dotnet.package_flags`; **`always_keep_download`** (**warnings live since 2026.11.0**) | `MISE_CREDENTIAL_HOST`/`MISE_CREDENTIAL_PROVIDER`; tool-level `postinstall`; `prerelease` option; the download cache |
+| **2027.11.0** | `credential_command` legacy single positional argument (the hostname arg); `*.default_packages_file`; `dotnet.package_flags`; **`always_keep_download`** (**warnings live since 2026.11.0**); **`MISE_USE_TOML=0`** (added 2026.11.13, warns once per run when it changes behavior; never from shims or `hook-env`) | `MISE_CREDENTIAL_HOST`/`MISE_CREDENTIAL_PROVIDER`; tool-level `postinstall`; `prerelease` option; the download cache; `mise use --path .tool-versions` to write one, `MISE_GLOBAL_CONFIG_FILE=~/.tool-versions` to keep it global |
 | **2027.12.0** | `experimental_monorepo_root` (warns since 2026.7.7); `aqua.registry_url` | `monorepo_root`; `aqua.registries` |
 | **2028.4.0** | `auto_update` / `auto_update_check_duration` | `self_update.auto` / `self_update.check_duration` |
-| **2028.5.0** | `mise tasks add` replacing a **different** existing task without `--force` is refused (warns from 2027.5.0; re-adding an identical task is a no-op) | `mise tasks add --force`, or `mise tasks set` |
+| **2028.5.0** | `mise tasks add` replacing a **different** existing task without `--force` is refused (warns from 2027.5.0; re-adding an identical task is a no-op); **`[bootstrap.macos.dock\|finder\|keyboard\|trackpad\|defaults\|defaults_entries\|login_items]`** stop being read (deprecated 2026.11.8, **warns from 2027.5.0**; `[bootstrap.macos.launchd.agents]` is unaffected) | `mise tasks add --force`, or `mise tasks set`; `[bootstrap.settings.macos.*]` (same keys — but mise < 2026.11.8 ignores it) |
 | **2028.10.0** | `locked_require_checksum` setting (added 2026.11.0; warns from 2027.10.0) — locked mode will always require checksums | Remove the setting |
 
-> **Not deprecated:** the top-level `mise dotfiles` / `mise dot` command. A 2026.7.16 note announced a deprecation (removal 2028.2.0), but it was **reversed in 2026.9.8** — re-verified on 2026.11.5 (no `deprecated_at!`, no warning; `mise bootstrap dotfiles` is now the hidden alias).
+> **Not deprecated:** the top-level `mise dotfiles` / `mise dot` command. A 2026.7.16 note announced a deprecation (removal 2028.2.0), but it was **reversed in 2026.9.8** — re-verified on 2026.11.13 (no `deprecated_at!`, no warning; `mise bootstrap dotfiles` is now the hidden alias).
 
 **Default flips ahead:** `auto_env` → `true` in **2027.6.0** (warns from 2026.12.0) · `[monorepo].lockfile` → root lockfiles in **2027.6.0** · `cargo.binstall_native` warns 2027.1.0 and defaults on **2027.7.0**.
 
-**Recent default changes (2026.11.x):** `npm.provenance` → **on** (2026.11.1) · new lockfiles are **revision 4** (2026.11.1) · `--locked` **requires checksums** (`locked_require_checksum` unset ⇒ on, 2026.11.0) · `skills.dir` → **unset**, preferring `.agents/skills` (2026.11.0) · `task.history` → **on**, 20 runs per task (2026.11.3).
+**Recent default changes (2026.11.x):** `color_theme` → **`base16`** (2026.11.6) · `npm.provenance` → **on** (2026.11.1) · new lockfiles are **revision 4** (2026.11.1) · `--locked` **requires checksums** (`locked_require_checksum` unset ⇒ on, 2026.11.0) · `skills.dir` → **unset**, preferring `.agents/skills` (2026.11.0) · `task.history` → **on**, 20 runs per task (2026.11.3).
 
 **Recent default changes (2026.10.x):** `node@lts` → **Node.js 26** (2026.10.22; pin `node@24` or `lts-krypton` to stay) · `lockfile_mode` → **`generate`** (2026.10.19) · `java.shorthand_vendor` → **`temurin`** (2026.10.5) · the 24h `minimum_release_age` default now covers **every backend** (2026.10.15) · `fetch_remote_versions_cache` unset ⇒ install/use/run reuse a list for 23h (2026.10.11) · Windows + `experimental = true` ⇒ **identity** install layout (2026.10.10) · `_.file` `find_up` starts at the **config root** (2026.10.16/17) · an untrusted project's `[settings]` is **ignored** (2026.10.13) · `--affected` counts **working-tree** changes (2026.10.6) · `pin` also affects `upgrade --bump` (2026.10.18) · Node GPG checks cover **all** versions (2026.10.5; a missing `.sig` fails since 2026.10.19) · an npm `allow_builds` list approves **only** the listed packages (2026.10.16).
 
@@ -82,7 +82,7 @@ Dates below come from mise's own `deprecated_at!` macros and `settings.toml` (`d
 - **2026.10.20** — `system_packages.elevate_with` and `ruby.apply_patches` are global-only · a tool-option template that mixes `version` with `env`/`vars` renders at install time and no longer sees `env`/`vars` · bare `mise use <tool>` reuses the newest installed version.
 - **2026.10.21** — `mise dot add` refuses a `mode = "template"` target without `--force`.
 - **2026.10.22** — `node@lts` is Node.js 26 · `elevate_with = ""` means never elevate · remote git task sources reject an empty, `HEAD`, or `-`-prefixed `ref`.
-- **2026.10.23** — project task grants can't use keys from your personal fnox config · `[wrappers]` skip only the running wrapper, so nested commands go through other wrappers · `mise uninstall ruby 3.4.1` matches only exact or `.`/`-`/`+` continuations.
+- **2026.10.23** — project task grants can't use keys from your personal fnox config (**reversed in 2026.11.12**) · `[wrappers]` skip only the running wrapper, so nested commands go through other wrappers · `mise uninstall ruby 3.4.1` matches only exact or `.`/`-`/`+` continuations.
 - **2026.10.24** — `latest` for `gem:` skips RubyGems prereleases.
 
 **Breaking changes in the 2026.11.0 – 2026.11.5 line:**
@@ -91,6 +91,15 @@ Dates below come from mise's own `deprecated_at!` macros and `settings.toml` (`d
 - **2026.11.2** — registry `temporal` installs the CLI (`aqua:temporalio/cli`); the server bundle is `aqua:temporalio/temporal`.
 - **2026.11.3** — `github:` asset autodetection skips `.whl` and `.gem` assets.
 - **usage 7.1.5 (bundled from 2026.11.x)** — a multi-target or repeated relationship property (`conflicts="--b --c"`) is a load-time error.
+
+**Breaking changes in the 2026.11.6 – 2026.11.13 line:**
+- **2026.11.6** — `color_theme` defaults to `base16` · `mise env --dotenv` quotes and escapes values (Docker `--env-file` reads the quotes literally).
+- **2026.11.7** — `mise run <task> -h` passes `-h` to tasks whose spec doesn't treat it as help · the "no version set" shim error is one line (`--verbose` for every installed version) · coding agents (`CLAUDECODE`, `AI_AGENT`) no longer see hints or update notices · `mise exec` puts `_.path` and pinned tool dirs before the caller's PATH (completed in 2026.11.10).
+- **2026.11.8** — `mise lock <unconfigured tool>` errors · 90 archived `asdf:` backends left the registry · `gem:` installs use `GEM_HOME` · a project `[tool_alias]` overrides a global one · `[bootstrap.macos.*]` preference tables move to `[bootstrap.settings.macos.*]` (old spelling still read).
+- **2026.11.10** — **usage 7.4.0**: a parent command's required/requires/conflicts flag rules apply under subcommands · `mise lock --dry-run` makes network requests · installs stop touching lockfiles whose configs all set `[tool_config] locked = true`.
+- **2026.11.11** — `mise unuse -g` removes the tool from every global config file · `http:` `checksum_url` is verified on install.
+- **2026.11.12** — **Temurin hotfix pins** must use the canonical version (`temurin-25.0.4+101` → `temurin-25.0.4.1+1`) · `mise lock` refuses an upgrade that would drop a platform · personal fnox keys and global-config task secrets are allowed again.
+- **2026.11.13** — `MISE_USE_TOML=0` deprecated (removed 2027.11.0) · core tools and `dotnet:` warn on unknown options.
 
 **Undated deprecations:** `[alias]` → `[tool_alias]` (now prints a warning) · `asdf_compat` (no longer supported) · `go.set_gopath` (set `GOPATH` in `[env]`) · `idiomatic_version_file` / `idiomatic_version_file_disable_tools` → `..._enable_tools` and `legacy_version_file*` → `idiomatic_version_file*` (these now have **no effect**) · `mise-env-fnox` plugin / `_.fnox-env` → `[secrets.fnox]` · `mise tasks run` (hidden) → `mise run` · `mise bootstrap dotfiles` (hidden) → `mise dot` · `npm.bun` → `npm.package_manager` · `profile`/`MISE_PROFILE` → `MISE_ENV` · monorepo automatic filesystem discovery → explicit `config_roots` · registry shorthands `localstack` → `lstk`, `actionlint` → `jactionlint`, `mprocs` → `dekit` (alias kept, 2026.10.5), `opencode` and `native-sdk` moved to npm (and `mbx` now means `mr-boxington`).
 

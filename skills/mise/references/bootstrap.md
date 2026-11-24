@@ -3,6 +3,7 @@
 **Contents**
 
 - [[bootstrap] Configuration](#bootstrap-configuration)
+  - [Settings Plugins ([bootstrap.settings], Experimental)](#settings-plugins-bootstrapsettings-experimental)
 - [Remote Bootstrap over SSH ([bootstrap.remote])](#remote-bootstrap-over-ssh-bootstrapremote)
 - [Declarative Dotfiles ([dotfiles])](#declarative-dotfiles-dotfiles)
 - [Dotfile Groups ([dotfile_groups])](#dotfile-groups-dotfile_groups)
@@ -72,9 +73,9 @@ mise bootstrap unapply ssh gpg --yes
 
 Removal is planned from the current config *with vs. without* the named envs (not from run history): managed files, directories, user services, systemd user units, and dotfile entries/edits it contributed are removed, unless still declared elsewhere (an `absent` declaration does not protect). Changed targets are skipped unless `--force`; dirs are removed only if empty. Packages, repos, and Compose projects need separate cleanup (the output says how); system services are out of scope. `mise bootstrap plan --json` reports `origin.config` / `origin.environment` per resource.
 
-`--only` / `--skip` are mutually exclusive, repeatable or comma-separated. Parts: `accounts`, `plugins`, `packages`, `files`, `services`, `firewall`, `compose`, `repos`, `dotfiles`, `mise-shell-activate`, `macos-defaults`, `macos-launchd-agents`, `linux-systemd-units`, `user`, `tools`, `task`, `final-hook`. The short aliases `shell`, `defaults`, `launchd`, `systemd` **warn** since 2026.10.4 (removed **2027.10.4**).
+`--only` / `--skip` are mutually exclusive, repeatable or comma-separated. Parts: `accounts`, `plugins`, `packages`, `files`, `services`, `firewall`, `compose`, `repos`, `dotfiles`, `mise-shell-activate`, `macos-defaults`, `macos-launchd-agents`, `linux-systemd-units`, `user`, `tools`, `settings` (2026.11.8), `task`, `final-hook`. The short aliases `shell`, `defaults`, `launchd`, `systemd` **warn** since 2026.10.4 (removed **2027.10.4**).
 
-**Execution order (20 steps — `https://mise.jdx.dev/bootstrap.html#how-it-runs`):**
+**Execution order (21 steps — `https://mise.jdx.dev/bootstrap.html#how-it-runs`):**
 
 1. `accounts` — `[bootstrap.users]` / `[bootstrap.groups]` (Linux)
 2. `plugins` — vfox plugins acting as package managers
@@ -87,15 +88,16 @@ Removal is planned from the current config *with vs. without* the named envs (no
 9. `repos` — `[bootstrap.repos]` git checkouts
 10. `dotfiles` — `[dotfiles]` / `[dotfile_groups]` (same as `mise dot apply`)
 11. `mise-shell-activate` — shell rc activation snippets
-12. `macos-defaults` (incl. `[bootstrap.macos.login_items]`)
+12. `macos-defaults` (`[bootstrap.settings.macos.*]`, incl. `login_items`)
 13. `macos-launchd-agents`
 14. `linux-systemd-units`
 15. `user` — `[bootstrap.user]` login shell
 16. `tools` — `mise install`
 17. plugin `packages` (if any package comes from a plugin manager, the `post-packages` hook runs **here** instead of after step 4)
-18. user `services` with `requires_tools = true` (runs even with `--skip tools`)
-19. `task` — `mise run bootstrap` (if defined)
-20. `final-hook` — `[bootstrap.hooks.final]`
+18. `settings` — `[bootstrap.settings.<plugin>]` through settings plugins (2026.11.8, experimental — see [Settings Plugins](#settings-plugins-bootstrapsettings-experimental))
+19. user `services` with `requires_tools = true` (runs even with `--skip tools`)
+20. `task` — `mise run bootstrap` (if defined; in a monorepo, the root's `//:bootstrap` task, 2026.11.11)
+21. `final-hook` — `[bootstrap.hooks.final]`
 
 The secrets preflight also covers `[dotfiles]` `mode = "template"` entries. Bootstrap offers to install `git` and `ssh` before cloning on a fresh machine (2026.10.6). History checkpoints are recorded only when at least one file is tracked or history already exists.
 
@@ -115,8 +117,17 @@ dotfile_groups = ["home", "zsh"]   # 2026.10.3: which [dotfile_groups] apply on 
                                    # (unset = all groups; a more-local list replaces others)
 
 # System packages — managers: apk: apt: aur: brew: brew-cask: choco: dnf: flatpak: flatpak-user:
-#   macos-app: mas: nix: pacman: scoop: snap: winget: zypper:
+#   macos-app: macports: mas: nix: pacman: scoop: snap: winget: zypper:
 [bootstrap.packages]
+# 2026.11.6: UNPREFIXED keys install through exactly ONE available manager — the first of
+# system_packages.prefer, else the distro manager (apt/dnf/pacman/zypper/apk) → brew → winget → scoop → choco.
+# No fallback: a failed install is an error. `names` overrides the package name per manager.
+git = "latest"
+openssl = { names = { apt = "libssl-dev", dnf = "openssl-devel" } }
+# 2026.11.11: MacPorts (macOS; never runs `port selfupdate`, doesn't install MacPorts, no version pins,
+# no import/prune; --update runs `port sync` first; NOT in the unprefixed order unless listed in prefer)
+"macports:ripgrep" = "latest"
+"macports:bc" = { state = "absent" }
 "apt:build-essential" = "latest"
 "apt:gcc:arm64" = "latest"          # 2026.10.9: apt keys may carry an :arch qualifier
 "dnf:@development-tools" = "latest" # 2026.10.9: dnf groups
@@ -152,7 +163,7 @@ artifact = "Example.app"
 # 2026.9.4+ `env` selector gates an entry on the active mise environment
 "apt:postgresql-client" = { version = "latest", env = ["ci", "staging"] }
 "pacman:libreoffice-fresh" = { state = "absent" }   # declare removal — ONLY pacman, scoop, snap,
-                                    # zypper (and dnf on rpm-ostree with ostree = "layer") remove;
+                                    # zypper, macports (and dnf on rpm-ostree with ostree = "layer") remove;
                                     # other managers just report drift
 # 2026.10.20: Chocolatey (Windows, choco.exe on PATH; skipped elsewhere). apply/upgrade need an ELEVATED
 # terminal (mise doesn't bypass UAC). Pins must match Chocolatey's version string exactly; reboot exit
@@ -215,6 +226,18 @@ owner = "root"
 [bootstrap.files."~/.oldrc"]
 state = "absent"
 
+# 2026.11.8: keep ONE marked block in a file mise doesn't own (between `# >>> mise:dev >>>` markers;
+# appended if missing, file created if absent; the rest is untouched). Works with template, os, notify,
+# owner, group, mode — NOT with source, content, replace, remove_empty, or state = "absent".
+# One block per entry; removing a block is manual.
+[bootstrap.files."/etc/hosts"]
+id = "dev"
+block = """
+127.0.0.1 dev.local
+127.0.0.1 api.local
+"""
+# 2026.11.10: `permissions` is accepted as another name for `mode` on files/directories (set only one)
+
 # Linux accounts — converge BEFORE the files that reference them; UID/GID collisions fail closed
 [bootstrap.users.deploy]
 groups = ["docker", "www-data"]
@@ -226,6 +249,12 @@ state = "present"
 # Services — running/stopped, enabled/disabled, masked
 [bootstrap.services.nginx]
 state = "running"
+enabled = true
+
+# 2026.11.10: state = "unchanged" manages ONLY boot/login enablement — never starts or stops it
+# (e.g. a login manager that would replace the console you're provisioning from); notify doesn't restart it
+[bootstrap.services.greetd]
+state = "unchanged"
 enabled = true
 # full field set: builtin, command, description, enabled, environment, masked,
 #                 on_change, requires_tools, restart, scope, state, working_directory
@@ -292,41 +321,43 @@ zprofile = "shims"
 zshrc = "activate"
 fish = "auto"
 
-# macOS — high-level convenience blocks…
-[bootstrap.macos.dock]
+# macOS preferences — 2026.11.8 spelling [bootstrap.settings.macos.*] (the old [bootstrap.macos.dock|finder|
+# keyboard|trackpad|defaults|defaults_entries|login_items] still works: deprecated, warns from 2027.5.0,
+# removed 2028.5.0; the new spelling wins when both set a key; mise < 2026.11.8 IGNORES the new spelling)
+[bootstrap.settings.macos.dock]
 autohide = true
 orientation = "left"
 tilesize = 48
 apps = ["/Applications/Ghostty.app", "/Applications/Firefox.app"]   # 2026.9.6+
 
-[bootstrap.macos.finder]
+[bootstrap.settings.macos.finder]
 show_pathbar = true
 
-[bootstrap.macos.keyboard]
+[bootstrap.settings.macos.keyboard]
 key_repeat = 2
 initial_key_repeat = 15
 
-[bootstrap.macos.trackpad]
+[bootstrap.settings.macos.trackpad]
 tap_to_click = true
 
 # 2026.10.9: macOS Login Items (applied by `mise bootstrap macos defaults apply`)
-[bootstrap.macos.login_items]
+[bootstrap.settings.macos.login_items]
 apps = ["/Applications/Ghostty.app", "~/Applications/X.app"]
 exclusive = false                 # true = remove undeclared login items (default: additive)
 
 # …or raw user defaults by domain
-[bootstrap.macos.defaults]
+[bootstrap.settings.macos.defaults]
 "com.apple.finder" = { AppleShowAllFiles = true }
 
-# 2026.9.5+ superset of [bootstrap.macos.defaults] — adds host/path targeting
-[[bootstrap.macos.defaults_entries]]
+# 2026.9.5+ superset of the defaults table — adds host/path targeting
+[[bootstrap.settings.macos.defaults_entries]]
 domain = "com.apple.finder"
 key = "AppleShowAllFiles"
 value = true
 # host = "currentHost"
 # path = "~/Library/Preferences/com.example.plist"
 
-# Services (launchd on macOS, systemd on Linux)
+# Services (launchd on macOS, systemd on Linux) — launchd agents STAY under [bootstrap.macos]
 [bootstrap.macos.launchd.agents.my-sync]
 program = "~/.local/bin/my-sync"
 args = ["--watch"]
@@ -337,6 +368,10 @@ process_type = "Background"   # 2026.9.12+ → launchd ProcessType:
                               # misspellings are REJECTED at config time
 nice = 10                     # -20..20
 keep_alive_on_failure = true  # KeepAlive = { SuccessfulExit = false }; not with keep_alive
+# 2026.11.6: SoftResourceLimits / HardResourceLimits — keys core, cpu (s), data, file_size, memory_lock,
+# number_of_files, number_of_processes, resident_set_size, stack (bytes); soft must not exceed hard
+soft_resource_limits = { number_of_files = 10240 }   # launchd starts agents with a soft limit of 256
+hard_resource_limits = { number_of_files = 65536 }
 
 # 2026.10.20: LaunchEvents, keyed by stream then an event name you choose (launchd's property case;
 # quote stream names with dots; no TOML datetimes; strings templated, ~ not expanded). The program must
@@ -406,6 +441,30 @@ run = "gh auth status || gh auth login"
 
 Declarative steps converge idempotently; the `bootstrap` **task runs every invocation** (write it to be idempotent). Hooks stop bootstrap on failure and run in the current process environment. Unpinned `[bootstrap.repos]` entries are never pulled by a plain apply — use `mise bootstrap repos update` for the explicit fetch + fast-forward. Switching a systemd unit name between service and timer stops/disables/removes the stale sibling.
 
+**More bootstrap behavior:** `mise bootstrap --self-update` updates mise first, then re-runs bootstrap with the new binary (2026.11.11) · `mise bootstrap plan` lists repositories (`create`/`update`/`unchanged`/`unknown`) and hooks (a `run` action) (2026.11.8) · `mise bootstrap packages prune` keeps runtime dependencies of declared formulae, and third-party-tap formulae pour tap bottles and download from private GitHub releases (2026.11.11) · brew source builds start from a clean environment (2026.11.8) · `[bootstrap.users]` / `[bootstrap.groups]` are not labelled experimental (schema, 2026.11.13).
+
+#### Settings Plugins (`[bootstrap.settings]`, Experimental)
+
+Added **2026.11.8**; needs `experimental = true` (or `MISE_EXPERIMENTAL=1`). A settings plugin applies one program's or desktop's settings (e.g. a distro's appearance settings) from `[bootstrap.settings.<plugin>]`; mise compares the declared values with what the plugin reports and writes only the differences. Which keys exist is up to the plugin:
+
+```toml
+[bootstrap.settings.desk.appearance]
+blur = true
+blur_strength = 4
+```
+
+```bash
+mise bootstrap --only settings --dry-run     # "mise would set desk: appearance.blur false -> true"
+mise bootstrap settings status [--missing]   # --missing exits 1 when a value drifted or a plugin can't run
+mise bootstrap settings apply [--dry-run]
+```
+
+- These commands **don't install plugins** — run `mise bootstrap plugins apply` first (or `--only plugins,settings`). Plugins come from `[bootstrap.plugins]`, `mise plugins install bootstrap-settings:<name> <git-url>` (the `bootstrap-settings:` type prefix), `mise plugins link`, or a system dir (`/usr/share/mise/plugins`, then `$MISE_SYSTEM_DATA_DIR/plugins`; `MISE_SYSTEM_PLUGINS_DIRS` replaces the list). A user-installed plugin overrides a system one of the same name.
+- Sections merge across config files key by key (more local wins); `desk_plugin`/`desk-plugin` name the same plugin, and `appearance = { blur = true }` equals `"appearance.blur" = true`. Independent config roots that set one key to different values make mise **refuse** to apply settings.
+- A section for a plugin that isn't installed, can't run, or targets another OS is **skipped** (listed in `bootstrap: follow-up`; another-OS sections don't count toward `--missing`), so one config can hold every platform's settings.
+- `mise bootstrap status` and `plan` **don't check settings yet** — use `settings status` for drift.
+- `[bootstrap.settings.macos]` is **built in** (not a plugin; no plugin may be named `macos`) and holds the macOS preferences applied by the `macos-defaults` part.
+
 ### Remote Bootstrap over SSH (`[bootstrap.remote]`)
 
 Added **2026.8.2**, extended through 2026.8.11. mise archives and stages your project on each target, provisions a compatible mise binary, runs bootstrap with forwarded flags, then cleans up staging.
@@ -444,7 +503,7 @@ mise bootstrap remote --prompt-secrets --keep-staging
 
 **Binary provisioning is fail-closed.** mise detects each target's OS, architecture, and Linux libc (glibc vs musl); when the local binary is incompatible it downloads the matching raw executable for the *same release* from GitHub with **minisign-verified checksums**. Custom or debug builds refuse to guess and require an explicit `mise_bin`, `remote_mise`, or `bootstrap_command`.
 
-`--only` / `--skip` accept the same part names as local bootstrap. Other flags: `--connect-timeout`, `--force-dotfiles`, `--update`, `-y/--yes`, `-i/--identity-file`, `--port`, `--ssh-option`, `--bootstrap-command`, `--adopt`, `--source`, `--exclude`, `--copy-link(s)`, `--remote-mise`, `--mise-bin`, `--no-install-mise`, and the `--github-relay-*` flags (see [`mise ssh`](dev-tools.md#cli-commands-for-tools)).
+`--only` / `--skip` accept the same part names as local bootstrap. Other flags: `--connect-timeout`, `--force-dotfiles`, `--update`, `-y/--yes`, `-i/--identity-file`, `--port`, `--ssh-option`, `--bootstrap-command`, `--adopt`, `--source`, `--exclude`, `--copy-link(s)`, `--remote-mise`, `--mise-bin`, `--no-install-mise`, and the `--github-relay-*` flags (see [`mise ssh`](dev-tools.md#cli-commands-for-tools)). Since 2026.11.8 `mise bootstrap remote` refuses to archive `$HOME` or `/` and stops above 512 MiB or 100,000 files (`--yes` skips the checks).
 
 ### Declarative Dotfiles (`[dotfiles]`)
 
@@ -522,7 +581,15 @@ profile = "work"
 default = true
 ```
 
-**Entry fields:** `source` · `content` · `mode` (`symlink` \| `symlink-each` \| `copy` \| `template` \| `track` \| **`track-local`** \| **`absent`**) · `exclude` · `manifest` (`"git"`) · `block` · `line` · `position` (`append` \| `prepend`) · `template` (`"tera"`) · **`merge`** (`true` \| `"missing"`) · `comment` · `encrypt` (track only) · `variants` (each `{ os?, profile?, default?, target?, machine? }`; `target` is a Tera template since 2026.10.18) · **`permissions`** (octal string `"0600"`) · **`remove_empty`** (template mode) · **`relative`** (symlink modes) · **`dot_prefix`** (directory source + `symlink-each`/`copy`) · **`include`** / **`allow_plaintext`** (track only) · `enabled` · `autosave` · **`depends`** (2026.11.0, below). A template entry with no source falls back to `<path>.tera` (2026.10.12).
+**Entry fields:** `source` · `content` · `mode` (`symlink` \| `symlink-each` \| `copy` \| `template` \| `track` \| **`track-local`** \| **`absent`**) · `exclude` · `manifest` (`"git"`) · `block` · `line` · `position` (`append` \| `prepend`) · `template` (`"tera"`) · **`merge`** (`true` \| `"missing"`) · `comment` · `encrypt` (track only) · `variants` (each `{ os?, profile?, default?, target?, machine? }`; `target` is a Tera template since 2026.10.18) · **`permissions`** (octal string `"0600"`) · **`remove_empty`** (template mode) · **`relative`** (symlink modes) · **`dot_prefix`** (directory source + `symlink-each`/`copy`) · **`include`** / **`allow_plaintext`** (track only) · `enabled` · `autosave` · **`depends`** (2026.11.0, below) · **`main_checkout`** (2026.11.13, below) · `create_if_missing`. A template entry with no source falls back to `<path>.tera` (2026.10.12).
+
+**`main_checkout = true` (2026.11.13)** — on a `symlink`/`symlink-each` entry, a source inside a **linked git worktree** is linked at the same path in the repo's **main checkout**, so the link survives `git worktree remove`. Other modes warn and ignore it (`false` is accepted everywhere); in a bare repository mise warns and links the source as written. Also works in `[dotfile_groups.*.entries]`:
+```toml
+[dotfiles]
+"~/.config/mise/config.toml" = { source = "mise.global.toml", main_checkout = true }
+```
+
+**Warnings and guards:** unknown keys in `[dotfiles]` entries, `[dotfile_groups.*.entries]`, and `[bootstrap.hooks]` **warn** (the entry still applies), and a block/line edit that also sets a whole-file key (`variants`, `enabled`) warns and the edit is ignored (2026.11.9); `mise dot apply` warns before overwriting a `copy` target you edited since mise last wrote it (2026.11.8; `--dry-run` marks it `(edited since mise last wrote it)`), and **without a terminal and without `--yes` it refuses** to overwrite such targets (2026.11.7).
 
 | New field (2026.9.13–9.16) | Rules |
 |----------------------------|-------|
@@ -597,7 +664,8 @@ Added **2026.10.3**. Stow-package-style **named directory trees** under `dotfile
 
 ```toml
 [dotfile_groups.zsh]
-root = "zsh"                 # REQUIRED; relative = under dotfiles.root (~/.dotfiles), NOT the config dir
+root = "zsh"                 # defaults to the GROUP NAME (2026.11.12); relative = under dotfiles.root
+                             # (~/.dotfiles), NOT the config dir
 
 [dotfile_groups.home]
 root = "home"
@@ -613,6 +681,8 @@ exclude = ["README.md"]
 "~/.ssh/config" = { mode = "copy", permissions = "0600" }
 "~/.gitconfig" = { source = "git/config.tmpl", mode = "template" }   # relative source starts at the group root
 "~/.kitty-old.conf" = { mode = "absent" }
+"~/.crossnote" = { source = "crossnote", mode = "symlink" }   # 2026.11.12: may deploy OUTSIDE the group's
+                                            # target — needs an explicit source unless the mode takes none
 
 # Per machine, e.g. ~/.config/mise/config.local.toml
 [bootstrap]
@@ -749,6 +819,8 @@ branch = "main"
 | `notify` | `true` | Desktop notification when conflicts pause sharing (retries stay silent) |
 | `allow_plaintext_history` | `false` | Allow publishing history containing unencrypted versions of files now marked for encryption (also bypasses the pre-push secret scan) |
 | `describe_command` | `""` | Command that names commits the watcher saves (an agent, say); gets one JSON object on stdin |
+| `lock_wait` | `"30s"` | **2026.11.6.** How long a command waits for another history operation before failing; `0` fails at once, values above `1h` count as `1h`. `mise dot watch` and `mise dot recover` never wait |
+| `allow_secret_values` | `[]` | **2026.11.11, global-only.** Values the secret scan of saved versions accepts (a known placeholder) |
 | `watch.debounce` | `"2s"` | Quiet period before the watcher saves a changed file |
 | `watch.max_interval` | `"24h"` | Longest autosave interval a constantly-changing file is stretched to |
 | `watch.reconcile` | `"10m"` | Full rescan for missed changes (`0` disables periodic reconciliation) |

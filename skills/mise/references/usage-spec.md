@@ -19,13 +19,13 @@
 
 The `usage` field uses [KDL-inspired syntax](https://usage.jdx.dev/) to define arguments, flags, and completions.
 
-> 🔴 **Version context (verified 2026-11-09).** mise 2026.11.5 bundles **usage-lib 7.3.0** (2026.10.4 → 6.12.1, 2026.10.6 → 7.0.0, 2026.10.16 → 7.1.0, 2026.10.25 → 7.1.4, 2026.11.5 → 7.3.0; mise's own CLI spec still declares `min_usage_version "6.11"`). **The usage 6 → 7 major bump changes nothing a mise task author writes** — its breaking changes (derive macros no longer read `Cargo.toml`, `usage generate fig` removed, `usage-argv` internals) are Rust-library/CLI concerns. Since then: **7.1.5** makes a multi-target or repeated relationship property a load-time error (below); **7.2.0** adds one spec node, [`unknown_env`](#unknown-environment-variables-unknown_env), and offers `-h/--help`/`-V/--version` in flag completion; **7.3.0** (a shared `completion` subcommand) and 7.2.0's `setting=` flag key are Rust-library features — mise rejects `setting` (`unsupported flag key setting`). In **2026.8.11** mise migrated its *own* CLI parser, help output, and shell completions from clap to usage-rs.
+> 🔴 **Version context (verified 2026-11-23).** mise 2026.11.13 bundles **usage-lib 7.4.0** (2026.10.4 → 6.12.1, 2026.10.6 → 7.0.0, 2026.10.16 → 7.1.0, 2026.10.25 → 7.1.4, 2026.11.5 → 7.3.0, 2026.11.10 → 7.4.0; usage 7.4.1 — PowerShell/fish completion and Cobra-exporter fixes — is not in mise yet; mise's own CLI spec still declares `min_usage_version "6.11"`). **The usage 6 → 7 major bump changes nothing a mise task author writes** — its breaking changes (derive macros no longer read `Cargo.toml`, `usage generate fig` removed, `usage-argv` internals) are Rust-library/CLI concerns. Since then: **7.1.5** makes a multi-target or repeated relationship property a load-time error (below); **7.2.0** adds one spec node, [`unknown_env`](#unknown-environment-variables-unknown_env), and offers `-h/--help`/`-V/--version` in flag completion; **7.3.0** (a shared `completion` subcommand) and 7.2.0's `setting=` flag key are Rust-library features — mise rejects `setting` (`unsupported flag key setting`, re-verified on 2026.11.13); **7.4.0** enforces [parent flag rules under subcommands](#subcommands-cmd-block), handles a `help` word on commands with subcommands, lets the spec decide whether `-h`/`--help` mean help, and adds `usage lint -q/--quiet`. In **2026.8.11** mise migrated its *own* CLI parser, help output, and shell completions from clap to usage-rs.
 >
 > **Nothing is compiled out.** Since **2026.8.13** mise depends on `usage-cli`, whose manifest enables usage-lib's `validation` and `unstable_choices_env` features; Cargo unifies features across the build, so mise's single usage-lib gets them. `validate=` and `choices env=` **work and are enforced** (see [Validation and Env-Backed Choices](#validation-and-env-backed-choices)).
 >
 > **usage 6.11–6.12 change how specs are written:** `choices run="cmd"` (command-backed choices that validate), `complete` nested inside an `arg`/`flag`, `complete … delegate="tool"`, `$usage_cmd` for the chosen subcommand, `default_subcommand_on_empty`, and `logo`. All re-verified on mise 2026.10.25 below.
 >
-> 🔴 **`choices` MUST go in a child block — the inline form is silently ignored.** `arg "<env>" choices "dev" "prod"` parses (KDL reads the bare `choices` as just another positional string) but **validates nothing**: `mise run t bogus` runs with `usage_env=bogus`, `--help` lists no possible values, and `mise tasks validate` passes. Always write `arg "<env>" { choices "dev" "prod" }` — then `bogus` is rejected with `Invalid choice for arg env: bogus, expected one of dev, prod`. (Verified on 2026.11.5.)
+> 🔴 **`choices` MUST go in a child block — the inline form is silently ignored.** `arg "<env>" choices "dev" "prod"` parses (KDL reads the bare `choices` as just another positional string) but **validates nothing**: `mise run t bogus` runs with `usage_env=bogus`, `--help` lists no possible values, and `mise tasks validate` passes. Always write `arg "<env>" { choices "dev" "prod" }` — then `bogus` is rejected with `Invalid choice for arg env: bogus, expected one of dev, prod`. (Verified on 2026.11.13.)
 >
 > 🔒 **Dynamic completion needs trust (2026.10.19).** `complete run=`, `complete delegate=`, `choices run=`, and `mount` run **only for trusted configs**; untrusted projects fall back to file completion (static `choices`, task names, and help still complete). Safe mode keeps them off even when trusted. A project with only a `mise-tasks/` directory needs `mise trust .`. Candidates containing control characters are dropped, and all candidates are treated as **plain text** (never shell-evaluated).
 >
@@ -306,7 +306,7 @@ Execution: `sh -c` (`cmd /c` on Windows when `sh` is absent), stdin closed, `__U
 
 mise renders a TOML task's `usage` string with **its own Tera context** (`config_root`, `cwd`, `env`, `vars`, `tools`, `mise_bin`, `xdg_*` …) **before** usage parses it. Consequences, verified on 2026.11.5:
 
-- `{{ words[PREV] }}` / `{{ usage }}` meant for usage fail when the task is parsed — `[bad] ERROR Failed to render task usage … Cannot index into an undefined value` — breaking `mise run <task>`, its `--help`, **and completion for every other task** (other tasks still run; `mise tasks validate` catches it).
+- `{{ words[PREV] }}` / `{{ usage }}` meant for usage fail when the task is parsed — `[bad] ERROR Failed to render task usage … Cannot index into an undefined value` — breaking `mise run <task>` and its `--help` ("This task does not accept any arguments"), and that task's completion falls back to files. On 2026.11.13 **other tasks still run and still complete** (completion prints a `WARN` to stderr); `mise tasks validate` reports `usage-parse-error`. (A `clause` spec, by contrast, still breaks completion for every task.)
 - Fix: wrap usage-time templates in `{% raw %}…{% endraw %}`.
 - Upside: mise values work in defaults — `arg "[dir]" default="{{ config_root }}/sub"`, `flag "--home <h>" default="{{ env.HOME }}"`.
 - File-task `#USAGE` lines are **not** rendered by mise; write `{{ words[PREV] }}` directly there.
@@ -432,6 +432,8 @@ cmd "production" effect="destructive" help="Deploy to production" {
 '''
 ```
 
+> **Parent flag rules apply under subcommands (usage 7.4.0, mise 2026.11.10).** A parent command's **non-global** flags now have their `required`, `requires`, and `conflicts` rules enforced after a subcommand is chosen — with `flag "--a" required=#true` at the top level, `mise run t one` fails `Missing required flag: --a` (verified on 2026.11.13); before, the subcommand skipped the check. `subcommand_negates_reqs #true` still relaxes `required`/`requires`, and a flag the subcommand redeclares uses the subcommand's definition. Tasks that relied on skipping a required parent flag now fail.
+
 | `cmd` attribute | Type | Notes |
 |-----------------|------|-------|
 | `help`, `long_help`, `before_help`, `after_help`, `before_long_help`, `after_long_help` | string | Help text (valid as props *or* child nodes) |
@@ -444,8 +446,8 @@ cmd "production" effect="destructive" help="Deploy to production" {
 | `alias "x"` | child node | Repeatable; supports `hide=#true` |
 | `example "code"` | child node | **Exactly one** positional arg; use `header=` / `help=` / `lang=` props |
 | `mount run="<cmd>"` | child node | Dynamic subcommand mounting; `run` is required. **Inside a `cmd` in a TOML `usage` it works at run time** (`usage_cmd="run inner"`, mounted args parsed); `synopsis="[TASK] [ARGS]…"` shows in that cmd's help |
-| `disable_help_subcommand` | boolean | Every task with `cmd` children lists a fake `help` subcommand (`mise run t help` → `unexpected word: help`); set `#true` to remove it |
-| `subcommand_help_heading`, `subcommand_value_name`, `next_line_help`, `term_width`/`max_term_width`, `display_order`, `help_heading`, `disable_version_flag`, `args_conflicts_with_subcommands` | various | All verified working on 2026.10.25. `display_order` orders whole help **sections** (2026.10.21, usage 7.1.3): each section sits at the lowest `display_order` of its commands, and a command without one counts as 999 (`args_conflicts_with_subcommands` → `subcommand 'sub' cannot be used with arguments on its parent command`). `disable_help_flag` hides the `-h` row but mise still prints help on `--help` |
+| `disable_help_subcommand` | boolean | Every task with `cmd` children lists a `help` subcommand. Since usage 7.4.0 (mise 2026.11.10) `mise run t help` prints the task's usage — but through `mise ERROR failed to validate task t`, **exit 1** (with or without a required parent flag). On a **leaf** command `help` is an ordinary word (`mise run t one help` → `unexpected word: help`), and strict `choices` reject it (`Invalid choice for arg mode: help`). Set `#true` to remove the subcommand (`t help` → `unexpected word: help`). Verified on 2026.11.13 |
+| `subcommand_help_heading`, `subcommand_value_name`, `next_line_help`, `term_width`/`max_term_width`, `display_order`, `help_heading`, `disable_version_flag`, `args_conflicts_with_subcommands` | various | All verified working on 2026.10.25. `display_order` orders whole help **sections** (2026.10.21, usage 7.1.3): each section sits at the lowest `display_order` of its commands, and a command without one counts as 999 (`args_conflicts_with_subcommands` → `subcommand 'sub' cannot be used with arguments on its parent command`). `disable_help_flag #true` removes help entirely: since 2026.11.7 mise asks the spec whether `-h` means help, so `-h` **and** `--help` reach the task as ordinary arguments (`usage_x=--help`, verified on 2026.11.13) |
 | `subcommand_precedence_over_arg` | boolean | Works for a **multi-value** flag `flag "--items <i>..."` (`--items a b done` ⇒ `cmd=done`), **not** for a repeatable `var=#true` flag (`unexpected word: b`) or variadic positionals |
 | `surface`, `available_if` | — | Metadata only — no effect in mise. (`view` and `about_md` are **top-level** nodes, not `cmd` attributes: `cmd "a" view="z"` is a hard error `unsupported cmd prop view`; at the top level they parse and do nothing) |
 
@@ -518,7 +520,7 @@ include file="./other.usage.kdl"   # merge another spec (file= is required)
 
 `repository` (a plain URL, like `Cargo.toml`'s) is distinct from `source_code_link_template` (a per-command deep link) — neither implies the other. `bin "x"` does **not** rename the usage line in mise — help always uses the task name.
 
-**`default_subcommand` vs `default_subcommand_on_empty` (verified):** with only `default_subcommand "run"`, a bare `mise run t` runs the *root* (`$usage_cmd` empty) while `mise run t src` routes to `run`. Adding `default_subcommand_on_empty #true` makes the bare call run `run` too (its arg defaults apply). `--help` marks the default `(default)`.
+**`default_subcommand` vs `default_subcommand_on_empty` (verified):** with only `default_subcommand "run"`, a bare `mise run t` runs the *root* (`$usage_cmd` empty) while `mise run t src` routes to `run`. Adding `default_subcommand_on_empty #true` makes the bare call run `run` too (its arg defaults apply). `--help` marks the default `(default)`. Since usage 7.4.0 (mise 2026.11.10), `mise run t <TAB>` with `default_subcommand_on_empty` offers the root's subcommands and flags again (verified: `other`, `run`).
 
 **`config` block** — declares a CLI's settings for docs, JSON-schema, and SDK generation:
 
@@ -576,7 +578,7 @@ A `validate` rule runs **after defaults and env fallbacks are applied** — it i
 
 ### Still Not Implemented (do not use)
 
-These appear in usage docs but hard-error (or silently do nothing) in mise 2026.11.5 (each re-probed). Errors now carry a precise span, e.g. `unsupported arg key parse`:
+These appear in usage docs but hard-error (or silently do nothing) in mise 2026.11.13 (each re-probed). Errors now carry a precise span, e.g. `unsupported arg key parse`:
 
 | Syntax | Result in mise | Use instead |
 |--------|----------------|-------------|

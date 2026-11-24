@@ -177,7 +177,7 @@ Supported files include `.nvmrc`, `.node-version`, `package.json`, `.python-vers
 
 ### Key Settings Reference
 
-mise ships **361 settings** (leaf count from `https://mise.jdx.dev/schema/mise.json` on 2026.11.5: 181 top-level keys, 40 of which are nested namespaces — note `mise settings --all` prints only the ones that resolve to a value, omitting unset optional ones). **Changed defaults/types:** `npm.provenance` new and **on** (2026.11.1, see [NPM Backend](dev-tools.md#npm-backend)); `skills.dir` `.claude/skills` → **unset** (2026.11.0, see [Agent Skills](dev-tools.md#packslip-man-pages-and-agent-skills)); `lockfile_mode` `merge` → **`generate`** (2026.10.19); `java.shorthand_vendor` `openjdk` → **`temurin`** (2026.10.5); `paranoid` bool → **bool or list** (2026.10.14); `env_file` path → **list** (2026.10.14); `fetch_remote_versions_cache` `"1h"` → **unset** (2026.10.11, see below). This is a representative subset — run `mise settings --all` (or `mise settings ls`) for the live list, and `mise settings set <key> <value>` / `mise settings get <key>` to manage them.
+mise ships **371 settings** (leaf count from `https://mise.jdx.dev/schema/mise.json` on 2026.11.13: 183 top-level keys, 40 of which are nested namespaces — note `mise settings --all` prints only the ones that resolve to a value, omitting unset optional ones). **Changed defaults/types:** `color_theme` `default` → **`base16`** (2026.11.6; `default` now means the same as `base16` — set `"charm"` or `"auto"` for the old look); `npm.provenance` new and **on** (2026.11.1, see [NPM Backend](dev-tools.md#npm-backend)); `skills.dir` `.claude/skills` → **unset** (2026.11.0, see [Agent Skills](dev-tools.md#packslip-man-pages-and-agent-skills)); `lockfile_mode` `merge` → **`generate`** (2026.10.19); `java.shorthand_vendor` `openjdk` → **`temurin`** (2026.10.5); `paranoid` bool → **bool or list** (2026.10.14); `env_file` path → **list** (2026.10.14); `fetch_remote_versions_cache` `"1h"` → **unset** (2026.10.11, see below). This is a representative subset — run `mise settings --all` (or `mise settings ls`) for the live list, and `mise settings set <key> <value>` / `mise settings get <key>` to manage them.
 
 ```toml
 [settings]
@@ -222,6 +222,7 @@ not_found_auto_install = true
 not_found_auto_install_registry = false  # 2026.9.17: install UNCONFIGURED tools into global config
 auto_install_disable_tools = []
 disable_backends = ["asdf"] # Disable backends (new installs only)
+enable_backends = []        # 2026.11.10: backend allowlist (empty = all) — see Backends Overview
 disable_default_registry = false  # Only affects vfox and asdf shorthands
 enable_tools = []           # Allowlist (unset = all; empty = none)
 disable_tools = []          # both match [tool_alias] names as well as full IDs (2026.11.4)
@@ -233,6 +234,9 @@ prereleases = false         # Allow pre-release versions for fuzzy requests
 registry_floating = false   # Fetch current registry data instead of release-pinned snapshots
 registry_cache_ttl = "1h"
 shared_install_dirs = []    # Read-only dirs searched for installed versions
+versions_host_exclude = []  # 2026.11.8: owner/repo globs that skip mise-versions (e.g. "my-org/*")
+shims.fallback_to_installed = false  # 2026.11.7: shim runs the newest installed version of an
+                            # unconfigured tool instead of erroring (Unix)
 system_deps = "prompt"      # prompt|auto|warn|ignore — vfox systemDependencies handling
 
 # Security
@@ -260,6 +264,7 @@ self_update.check_duration = "7d"   # (was auto_update_check_duration) — globa
 self_update.minimum_release_age = "24h"  # 2026.9.17; unset → minimum_release_age → 24h; "0s" = immediate
 tool_update.global_auto = false     # 2026.10.4: auto-update GLOBAL tools (bool | interval) — global only
 tool_update.check_duration = "24h"  # interval for per-tool auto_update = true (min 1h) — global only
+tool_update.self_update_first = false  # 2026.11.11: update mise first (needs self_update.auto) — global only
 download_cache = true               # 2026.10.7: verified download cache ($MISE_CACHE_DIR/downloads-cas)
 download_cache_max_size = "2GiB"    # 0 = unlimited (LRU)
 extract_max_ratio = 100             # 2026.10.19: decompression-bomb guard (0 = off) — global only
@@ -267,6 +272,7 @@ lockfile_mode = "generate"          # 2026.10.19 default; "merge" (incremental) 
 lockfile_auto_prune = true          # 2026.10.4: full `mise lock` drops tools absent from config
 install_layout = "legacy"           # experimental: "identity" (Windows + experimental ⇒ identity)
 prune.exclude = []                  # tools never pruned
+prune.forget_unused_after = "90d"   # 2026.11.13: forget tracked configs unused this long — global only
 upgrade.auto_prune = true   # 2026.8.15+: removal is now DEFERRED, not immediate —
                             # the replaced version is kept for upgrade.prune_after
 upgrade.prune_after = "24h" # grace period before a replaced version is auto-pruned
@@ -299,7 +305,7 @@ ipv4_only = false                   # 2026.10.22: IPv4 only for mise's own HTTP 
 
 # UI / shell
 color = true                # Colorized output
-color_theme = "default"     # auto|default|charm|base16|catppuccin|dracula
+color_theme = "base16"      # auto|default|charm|base16|catppuccin|dracula (default base16 since 2026.11.6)
 terminal_progress = true    # OSC 9;4 terminal progress indicators
 verbose = false             # Verbose install output
 activate_aggressive = false # Push tool bin-paths to the front of PATH
@@ -408,6 +414,8 @@ logs = false                # also export task output lines
 sudo = true                 # set managers = [...] to pick package managers
 # elevate_with = "run0"     # GLOBAL config only (2026.10.20); unset = sudo → run0 → doas, "" = never elevate (2026.10.22)
 ostree = "error"            # 2026.10.9: rpm-ostree hosts — "error" | "layer"
+# prefer = ["brew", "macports"]  # 2026.11.6: order (and allowlist) for UNPREFIXED [bootstrap.packages] keys;
+#   unset = distro manager (apt/dnf/pacman/zypper/apk), brew, winget, scoop, choco
 
 # Java (core tool)
 [settings.java]
@@ -435,20 +443,27 @@ shorthand_vendor = "temurin"   # 2026.10.5 default (was openjdk)
 | `upgrade.prune_after` | duration | `"24h"` | Grace period before versions replaced by `mise upgrade` are auto-pruned |
 | `locked_require_checksum` | bool | unset (⇒ **on**, except with `lockfile_mode = "merge"`) | **2026.11.0.** `--locked` fails before downloading when a lock entry's URL for this platform has no checksum. `false` restores the old behavior; `true` also enforces it in merge mode. Deprecated with merge mode (warns 2027.10.0). See [Lockfiles](dev-tools.md#lockfiles-miselock) |
 | `status.show_env_ignore` | string[] | `[]` | **2026.11.5.** Names or shell globs hidden from the `status.show_env` line (`["GO*", "DENO_INSTALL_ROOT"]`); env `MISE_STATUS_MESSAGE_SHOW_ENV_IGNORE` (comma list) |
-| `task.lock_timeout` / `task.history` / `task.history_limit` / `task.logs` | — | — | **2026.11.0–11.3.** See [Global Task Settings](task-configuration.md#global-task-settings) |
+| `task.lock_timeout` / `task.lock_pools` / `task.history` / `task.history_limit` / `task.logs` | — | — | **2026.11.0–11.9.** See [Global Task Settings](task-configuration.md#global-task-settings) |
+| `enable_backends` | string[] | `[]` (all) | **2026.11.10.** Backend allowlist — see [Backends Overview](dev-tools.md#backends-overview) |
+| `versions_host_exclude` | string[] | `[]` | **2026.11.8.** Case-insensitive `owner/repo` globs (`my-org/*`) for `github:` repos looked up on GitHub directly, so their names aren't sent to mise-versions |
+| `shims.fallback_to_installed` | bool | `false` | **2026.11.7.** A shim for a tool **no config selects** runs the newest installed version instead of failing (Unix; Windows `.exe` shims keep the error) |
+| `tool_update.self_update_first` | bool | `false` | **2026.11.11.** Update mise before automatic tool updates (skips the tools if that fails); needs `self_update.auto`; global-only |
+| `prune.forget_unused_after` | duration | `"90d"` | **2026.11.13.** Forget a tracked config/tool stub no mise command has loaded for this long; `"0s"` keeps it until the file is deleted; global-only |
+| `packslip.compinit` | bool | `true` | **2026.11.13.** Let zsh activation run `compinit -i` to register packslip completions when `compdef` isn't defined yet. Set `false` when a plugin manager defers `compinit` (zinit): mise then skips it and registers the completions once `compdef` exists |
+| `system_packages.prefer` | string[] | unset | **2026.11.6.** Manager order for unprefixed `[bootstrap.packages]` keys — see [Bootstrap packages](bootstrap.md#bootstrap-configuration) |
 | `not_found_auto_install_registry` | bool | `false` | **2026.9.17.** Command-not-found installs an *unconfigured* registry tool when exactly one provides the command, adding it to global config |
 | `self_update.minimum_release_age` | string | unset (→ `minimum_release_age` → `24h`) | **2026.9.17.** Release-age delay for self-update, auto-update, and update notices. **Not** global-only |
 | `dotfiles.relative_symlinks` | bool | `false` | **2026.9.14.** Relative symlink targets for `symlink`/`symlink-each` |
-| `truncate` | bool | `true` | Terminal-width truncation; `--truncate`/`--no-truncate` override. **Auto-disabled when a coding agent is detected** (2026.9.6+) |
+| `truncate` | bool | `true` | Terminal-width truncation; `--truncate`/`--no-truncate` override. **Auto-disabled when a coding agent is detected** (2026.9.6+). mise detects an agent from `CLAUDECODE`, `CODEX_SANDBOX`, or the vendor-neutral `AI_AGENT`; since 2026.11.7 it then also prints progress as appended lines and hides hints, `self-update` hints, and the new-version notice (`AI_AGENT=0` shows them again). Tools and env are unaffected |
 | `disable_update_warning` | bool | `false` | Suppress the "a newer mise is available" warning (2026.9.5+) |
 | `disable_hints` | string[] | `[]` | Silence specific hint messages by name |
 | `self_update.repository` / `self_update.api_url` | string | `jdx/mise` / `https://api.github.com` | Source used by `mise self-update` |
 | `github_relay.*` | — | — | `concurrency` (`8`, 1–32, excess fails closed), `request_timeout` (`5m`), `max_duration` (`0s` = session lifetime), `log_requests` (`false`), `log_format` (`text`\|`jsonl`) — for [`mise ssh`](dev-tools.md#cli-commands-for-tools) borrowed GitHub access |
 | `packslip.exec` / `packslip.stampers` | bool / array | `false` / unset | See [Packslip Backend](dev-tools.md#packslip-backend-preferred-where-available) |
 | `skills.*` | — | — | See [Agent Skills](dev-tools.md#packslip-man-pages-and-agent-skills) |
-| `history.*` | — | — | See [Dotfiles History](bootstrap.md#dotfiles-history-mise-dot--history) |
+| `history.*` | — | — | Incl. `history.lock_wait` (`"30s"`, 2026.11.6) and global-only `history.allow_secret_values` (2026.11.11) — see [Dotfiles History](bootstrap.md#dotfiles-history-mise-dot--history) |
 
-**Global-config-only settings (48 in `settings.toml`, 43 excluding deprecated aliases)** — ignored with a warning when set from project config: `auto_update`/`auto_update_check_duration` (deprecated → `self_update.auto`/`self_update.check_duration`), `ci`, `extra_ca_certs`, `extract_max_ratio`, `forgejo.credential_command`, `github.credential_command`, `gitlab.credential_command`, `github.enterprise_hosts`, `github.oauth_cache_get`, `github.oauth_cache_set`, `github.oauth_cache_secure_enclave`, `github_relay.{concurrency,log_format,log_requests,max_duration,request_timeout}`, `history.allow_plaintext_history`, **`history.describe_command`** (global-only since 2026.9.7, a security fix), `locked_scopes`, `paranoid`, `ruby.apply_patches` (2026.10.20), `safe`, `self_update.api_url`, `self_update.auto`, `self_update.check_duration`, `self_update.repository`, `shims_dir`, `system_installs_dir`, `system_packages.elevate_with` (2026.10.20), `system_shims_dir`, `task.cache.remote_oidc_audience`, `task.cache.remote_token`, `task.cache.remote_token_file` (plus their deprecated flat `task.cache_remote_*` aliases), `tool_update.global_auto`, `tool_update.check_duration`, `trusted_config_paths`, `unix_default_file_shell_args`, `unix_default_inline_shell_args`, `windows_default_file_shell_args`, `windows_default_inline_shell_args`, `write_targets.{tools,packages,dotfiles}` (a project value warns only when a global write would have used it, 2026.10.20), `yes`. Beyond this list, an **untrusted** project's entire `[settings]` table is ignored (2026.10.13). `[daemons_settings]` is the inverse — **ignored from global/system config** — and `[daemon_providers]` is allowed **only** in global config.
+**Global-config-only settings (51 in `settings.toml`, 46 excluding deprecated aliases)** — ignored with a warning when set from project config: `history.allow_secret_values`, `prune.forget_unused_after`, and `tool_update.self_update_first` (2026.11.11–11.13), `auto_update`/`auto_update_check_duration` (deprecated → `self_update.auto`/`self_update.check_duration`), `ci`, `extra_ca_certs`, `extract_max_ratio`, `forgejo.credential_command`, `github.credential_command`, `gitlab.credential_command`, `github.enterprise_hosts`, `github.oauth_cache_get`, `github.oauth_cache_set`, `github.oauth_cache_secure_enclave`, `github_relay.{concurrency,log_format,log_requests,max_duration,request_timeout}`, `history.allow_plaintext_history`, **`history.describe_command`** (global-only since 2026.9.7, a security fix), `locked_scopes`, `paranoid`, `ruby.apply_patches` (2026.10.20), `safe`, `self_update.api_url`, `self_update.auto`, `self_update.check_duration`, `self_update.repository`, `shims_dir`, `system_installs_dir`, `system_packages.elevate_with` (2026.10.20), `system_shims_dir`, `task.cache.remote_oidc_audience`, `task.cache.remote_token`, `task.cache.remote_token_file` (plus their deprecated flat `task.cache_remote_*` aliases), `tool_update.global_auto`, `tool_update.check_duration`, `trusted_config_paths`, `unix_default_file_shell_args`, `unix_default_inline_shell_args`, `windows_default_file_shell_args`, `windows_default_inline_shell_args`, `write_targets.{tools,packages,dotfiles}` (a project value warns only when a global write would have used it, 2026.10.20), `yes`. Beyond this list, an **untrusted** project's entire `[settings]` table is ignored (2026.10.13). `[daemons_settings]` is the inverse — **ignored from global/system config** — and `[daemon_providers]` is allowed **only** in global config.
 
 > **`gpg_verify` behavior (2026.7.12+):** GPG verification **always runs** when enabled, with Node/Swift signatures verified in-process via rPGP (no external `gpg` binary). Previously a missing `gpg` silently skipped verification — you must now set `gpg_verify = false` explicitly to opt out.
 
@@ -724,7 +739,7 @@ Use an absolute binary path and `--cd` (Claude Code: `claude mcp add mise -- mis
 - `MISE_SYSTEM_CONFIG_FILE` (default `/etc/mise/config.toml`)
 - `MISE_ENV_FILE` (`:`-separated list of names, `;` on Windows — e.g. `.env:.env.local`; parsed by `mise-dotenv` since 2026.10.3)
 - `MISE_${TOOL}_VERSION` (e.g., `MISE_NODE_VERSION=20`)
-- `MISE_TRUSTED_CONFIG_PATHS` / `MISE_CEILING_PATHS` / `MISE_IGNORED_CONFIG_PATHS` (`:` Unix, `;` Windows)
+- `MISE_TRUSTED_CONFIG_PATHS` / `MISE_CEILING_PATHS` / `MISE_IGNORED_CONFIG_PATHS` (`:` Unix, `;` Windows). A `MISE_CEILING_PATHS` entry reached through a symlink stops the search at the link **target** too (2026.11.13)
 - `MISE_OVERRIDE_CONFIG_FILENAMES` / `MISE_DEFAULT_CONFIG_FILENAME`
 - `MISE_LOG_LEVEL` (trace|debug|info|warn|error), `MISE_LOG_FILE`, `MISE_LOG_FILE_LEVEL`, `MISE_LOG_HTTP`
 - `MISE_LOG_VERBOSE_DEPS` — the only way to see h2/hyper/reqwest/rustls logs, even under `-vv`
@@ -741,6 +756,10 @@ Use an absolute binary path and `--cd` (Claude Code: `claude mcp add mise -- mis
 - `MISE_SELF_UPDATE_MINIMUM_RELEASE_AGE` — release-age delay for self-update and the installer
 - `MISE_NOT_FOUND_AUTO_INSTALL_REGISTRY`, `MISE_DOTFILES_RELATIVE_SYMLINKS`, `MISE_OTEL_ENABLED`, `MISE_OTEL_LOGS` — settings added in 2026.9.13 through 2026.9.17
 - `MISE_EXTRA_CA_CERTS`, `MISE_IPV4_ONLY`, `MISE_ENV_CACHE_REDACTED` — 2026.10.22 through 2026.10.25
+- `MISE_ENABLE_BACKENDS`, `MISE_VERSIONS_HOST_EXCLUDE`, `MISE_SHIMS_FALLBACK_TO_INSTALLED`, `MISE_PACKSLIP_COMPINIT`, `MISE_TASK_LOCK_POOLS`, `MISE_TOOL_UPDATE_SELF_UPDATE_FIRST`, `MISE_PRUNE_FORGET_UNUSED_AFTER`, `MISE_SYSTEM_PACKAGES_PREFER`, `MISE_HISTORY_LOCK_WAIT`, `MISE_HISTORY_ALLOW_SECRET_VALUES` — 2026.11.6 through 2026.11.13
+- `MISE_SYSTEM_PLUGINS_DIRS` (2026.11.8) — replaces the system plugin search list (`/usr/share/mise/plugins`, then `$MISE_SYSTEM_DATA_DIR/plugins`); `mise plugins ls` labels those `(system)`
+- `AI_AGENT` — vendor-neutral coding-agent flag (with `CLAUDECODE`, `CODEX_SANDBOX`); `AI_AGENT=0` turns detection off
+- 🔴 `MISE_USE_TOML=0` — **deprecated (2026.11.13), removed 2027.11.0**; warns once per run when it changes behavior. mise still reads `.tool-versions`: write one with `mise use --path .tool-versions`, and keep `~/.tool-versions` as the global config with `MISE_GLOBAL_CONFIG_FILE=~/.tool-versions`
 - `MISE_SELF_UPDATE_AUTO`, `MISE_TOOL_UPDATE_GLOBAL_AUTO`, `MISE_DOWNLOAD_CACHE`, `MISE_INSTALL_LAYOUT`, `MISE_LOCKFILE_MODE`, `MISE_PYPI_KEYRING_PROVIDER`, `MISE_SYSTEM_PACKAGES_ELEVATE_WITH`, `MISE_GITHUB_ENTERPRISE_HOSTS`, `MISE_AFFECTED_{COMMITTED,UNCOMMITTED,UNTRACKED}` — 2026.10.4 through 2026.10.19
 
 **Global CLI flags:** `-C/--cd <DIR>`, `-E/--env <ENV>` (repeatable or comma list), `-j/--jobs <N>`, `-q/--quiet`, `-v/--verbose`, `-y/--yes`, `--raw`, `--locked`, `--silent`, `--no-config`, `--no-env`, `--no-hooks`. (`--output` is accepted globally but hidden — it belongs to `mise run`.)

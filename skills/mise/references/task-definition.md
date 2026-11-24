@@ -112,7 +112,7 @@ If `task_config.includes` is set, it **replaces** these defaults — list them e
 # [MISE] depends=["lint"]
 ```
 
-**Accepted comment prefixes** for the usage block — `#`, `//`, and `::` — each in three forms (`#USAGE`, `# [USAGE]`, `#[USAGE]`); whitespace between the marker and keyword is allowed (`# USAGE`, `// USAGE`):
+**Accepted comment prefixes** for the usage block — `#`, `//`, `::`, and `--` (Lua, 2026.11.8: `--MISE`, `--USAGE`) — each in three forms (`#USAGE`, `# [USAGE]`, `#[USAGE]`); whitespace between the marker and keyword is allowed (`# USAGE`, `// USAGE`):
 
 ```javascript
 #!/usr/bin/env node

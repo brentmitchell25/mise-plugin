@@ -3,6 +3,7 @@
 **Contents**
 
 - [Dependencies](#dependencies)
+  - [Tag Dependencies](#tag-dependencies)
 - [Freshness with sources/outputs](#freshness-with-sourcesoutputs)
 - [Conditional Skip (skip_if)](#conditional-skip-skip_if)
 - [Redactions (Experimental)](#redactions-experimental)
@@ -19,7 +20,33 @@ depends_post = ["notify"]             # Run after (even on failure)
 wait_for = ["db:migrate"]             # Wait if running, don't add
 ```
 
-If a dependency fails, the dependent task skips execution. Shared dependencies run once.
+If a dependency fails, the dependent task skips execution. Shared dependencies run once. A bare name that no project task matches falls back to a **global** task of that name (2026.11.11).
+
+#### Tag Dependencies
+
+Depend on every task carrying a tag instead of listing them (2026.11.9) — works in `depends`, `depends_post`, and `wait_for`:
+
+```toml
+[tasks.lint-js]
+tags = ["lint"]
+run = "eslint ."
+
+[tasks.lint-py]
+tags = ["lint"]
+run = "ruff check ."
+
+[tasks.ci]
+depends = [{ tag = "lint" }, { tag = ["test", "slow"] }]   # any of the listed tags
+run = "echo all checks passed"
+
+[tasks.check-api]
+depends = [{ tag = "lint", task = "api:*" }]               # `task` narrows the tag's matches
+run = "true"
+```
+
+- A tag no task carries is an error (`no task has the tag: nope`, also reported by `mise tasks validate`) unless the entry sets `optional = true`. A task never depends on itself through its own tag.
+- `args`/`env` work as in other structured entries.
+- The string form `"tag:lint"` is **not** supported — it's looked up as a task name (`task not found: tag:lint`). Verified on 2026.11.13.
 
 ### Freshness with sources/outputs
 
@@ -37,7 +64,13 @@ A task is fresh when output mtime is newer than the newest source. The config fi
 
 > ⚠️ **`global_inputs` gotcha (verified):** a task with **no `sources` of its own** still receives `task_config.global_inputs` plus `outputs = { auto = true }` — so it is **skipped** while those global inputs are unchanged. Give such tasks explicit `sources`, or run with `--force`.
 
-> ⚠️ **Freshness does NOT respect `.gitignore`.** A change to a gitignored file matched by `sources` re-runs the task (verified). Only `mise watch` honors VCS ignores by default (override per task with `watch = { no_vcs_ignore = true }`).
+> ⚠️ **Freshness does NOT respect `.gitignore` by default.** A change to a gitignored file matched by `sources` re-runs the task (verified). Only `mise watch` honors VCS ignores by default (override per task with `watch = { no_vcs_ignore = true }`). Opt in per task with **`!@gitignore`** (2026.11.10):
+>
+> ```toml
+> sources = ["pkg/**", "!@gitignore", "pkg/dist/manifest.json"]
+> ```
+>
+> It removes git-ignored, **untracked** files from what the earlier entries matched; it's evaluated in order, so a later entry can add an ignored path back. Tracked files always count. It reads only the repo's own `.gitignore` files and `.git/info/exclude` (not your global excludes file). Verified on 2026.11.13: editing an ignored file under `pkg/` left the task fresh; editing a tracked one re-ran it.
 
 **Exclusions** use gitignore-style `!` prefixes (escape a literal `!` path with `\!`); later entries override earlier ones. Since 2026.7.15, `outputs` supports the same ordered exclusions and re-inclusions:
 ```toml

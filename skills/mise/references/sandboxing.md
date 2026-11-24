@@ -3,6 +3,7 @@
 **Contents**
 
 - [Sandboxing ([settings.sandbox])](#sandboxing-settingssandbox)
+  - [Unix Sockets (deny_unix / allow_unix)](#unix-sockets-deny_unix--allow_unix)
 - [Safe Mode (safe / MISE_SAFE=1)](#safe-mode-safe--mise_safe1)
 - [Paranoid Mode (paranoid / MISE_PARANOID)](#paranoid-mode-paranoid--mise_paranoid)
 - [Trust](#trust)
@@ -53,8 +54,32 @@ mise x --deny-all --allow-read=. --allow-write=./dist -- npm install
 | Deny all network | seccomp-bpf (x86_64/arm64; also blocks io_uring) | Seatbelt | ❌ (runs unrestricted) |
 | Per-host network (`allow_net`) | ❌ **errors** | ❌ **errors** (since 2026.10.5) | ❌ runs unrestricted |
 | Env filtering | Built-in | Built-in | ✅ (since 2026.10.5) |
+| Unix sockets (`deny_unix`/`allow_unix`) | Landlock, **kernel ≥ 7.1** (older kernels **error**) | ❌ **errors** | ⚠️ warns, runs unrestricted |
 
-If Landlock is unavailable or cannot apply filesystem restrictions, the command **fails**. On Windows a warning is printed and filesystem/network restrictions are not applied. An empty `allow_write` blocks **all** writes; to write through a project symlink that points outside, name its target. Sandboxing is **not** marked experimental.
+If Landlock is unavailable or cannot apply filesystem restrictions, the command **fails**. On Windows a warning is printed and filesystem/network restrictions are not applied. An empty `allow_write` blocks **all** writes; to write through a project symlink that points outside, name its target. Allowed paths must exist when the sandbox starts — on Linux a missing one is dropped with `sandbox: <path> does not exist, so its rule was dropped`, so list a directory that exists (`allow_write = [".", "~/.npm"]` for `npm install`, not `node_modules`). Sandboxing is **not** marked experimental.
+
+#### Unix Sockets (`deny_unix` / `allow_unix`)
+
+Added **2026.11.9**. `--deny-net` does not touch Unix sockets and `--deny-all` does **not** enable this — block them explicitly:
+
+```toml
+[tasks."agent:run"]
+run = "omp"
+allow_write = ["."]
+deny_unix = true
+allow_unix = ["/run/user/1000/allowed-service.sock"]   # a socket, or a directory of sockets; implies deny_unix
+```
+
+```bash
+mise run --deny-unix --allow-unix=/run/user/1000/bus agent:run
+mise x --deny-unix -- ./tool
+```
+
+- **Linux 7.1+ only.** On older kernels and on macOS the task fails before it runs (`Unix socket restrictions (--deny-unix, --allow-unix) are only supported on Linux 7.1 or later` — verified on macOS); Windows warns and runs unrestricted. Gate the field to Linux CI runners rather than setting it in a cross-platform task.
+- Path-based sockets are blocked unless `allow_unix` names the socket or a directory above it. An allowed socket must exist at start; for sockets the command creates, allow their directory.
+- Abstract sockets created **outside** the sandbox are blocked and can't be allowed individually; sandboxed processes can still reach each other's.
+- System daemons (`nscd`, `systemd-resolved`, `/dev/log`) break under `deny_unix` unless allowed.
+- In templates `deny_unix` composes (a task can't turn it off) and `allow_unix` lists combine.
 
 ### Safe Mode (`safe` / `MISE_SAFE=1`)
 

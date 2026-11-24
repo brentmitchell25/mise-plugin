@@ -254,7 +254,33 @@ Save it as `~/.config/mise/tasks/identity`, make it executable, and run `mise ru
 
 The same steps reproduced in isolation: a command after `cd` into an override tree still saw the start tree's token.
 
-**Fix:** use shims-only activation when `CLAUDECODE` is set (Claude Code sets it to `1` in the shells it spawns):
+**Fix (recommended): run `mise hook-env` before every command.** This is mise's documented Claude Code setup (the "Coding agents" docs page, mise 2026.11.7, tested upstream). Claude Code sources the file named by `$CLAUDE_ENV_FILE` before each Bash command, and only `SessionStart`, `Setup`, `CwdChanged`, and `FileChanged` hooks can write to it. Add to `~/.claude/settings.json` (or a project's `.claude/settings.json`):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"$CLAUDE_ENV_FILE\" ] && echo 'eval \"$(mise hook-env -s bash)\"' >> \"$CLAUDE_ENV_FILE\"; true"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- The appended line `eval "$(mise hook-env -s bash)"` (use `-s zsh` if Claude Code runs zsh) runs before **every** command, so it follows `cd`: the next command after `cd ~/work` gets the work tree's `[env]` and tools, and leaving the tree removes them. Unlike shims, the values are real shell variables — `echo $GH_TOKEN` and non-mise binaries (system `git`, `curl`) see them. In a non-interactive bash with no `mise activate`, running `hook-env` in tree A, then `cd` to tree B (still A's values), then `hook-env` again switched to B's values, and `hook-env` after `cd /` unset them (verified on mise 2026.11.13 — a simulation, not a live Claude Code session).
+- It does **not** refresh mid-command: in `cd sub && node --version`, `node` is still the parent tree's. When nothing changed since the last command, `hook-env` prints nothing and costs a few milliseconds.
+- The line must find `mise`. If `~/.local/bin` isn't on the agent shell's PATH, write the absolute path: `eval "$(~/.local/bin/mise hook-env -s bash)"`.
+- For a **fixed** environment for the whole session instead, write `mise env -s bash >> "$CLAUDE_ENV_FILE"` once — evaluated in the start directory, it does not follow `cd`.
+- mise doesn't install missing tools here (run `mise install` first), and an untrusted config is not loaded. Worktrees need nothing extra — `hook-env` reads whichever directory the command runs in.
+- Restart the agent session after editing `settings.json`.
+
+**Alternative: shims-only activation** — for agents without a per-command env-file hook (Codex runs commands through the login shell). Use it when `CLAUDECODE` is set (Claude Code sets it to `1` in the shells it spawns):
 
 ```zsh
 # ~/.zshrc
@@ -283,5 +309,5 @@ Each shim resolves the tool **and** the `[env]` of its current directory for tha
 - Route commit identity with `includeIf "gitdir:…"` plus `hasconfig:remote.*.url:` rules, with personal exceptions last
 - Use `NPM_CONFIG_USERCONFIG = "{{ config_root }}/.npmrc"` for a per-tree npm/pnpm user config, with tokens referenced as `${GITHUB_TOKEN}`
 - Use `CLAUDE_CONFIG_DIR` for a per-tree Claude Code login. It is read when `claude` starts
-- Use `mise activate <shell> --shims` when `CLAUDECODE` is set, then restart agent sessions
+- In Claude Code, add the `SessionStart` hook that appends `eval "$(mise hook-env -s bash)"` to `$CLAUDE_ENV_FILE`; for agents without such a hook, use `mise activate <shell> --shims` when `CLAUDECODE` is set. Restart agent sessions afterwards
 - Check any directory with `mise run identity --strict`

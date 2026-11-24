@@ -45,16 +45,20 @@ mise set -E staging NODE_ENV=staging  # subcommand -E/--env writes mise.staging.
 mise set --override AWS_PROFILE=personal   # 2026.10.14: global override file (beats all project config)
 mise set --prompt PASSWORD      # Interactive prompt — input is MASKED only with --age-encrypt
 cat private.key | mise set --stdin MY_KEY  # From stdin (single key, read to EOF)
-mise unset NODE_ENV             # Remove
+mise set NODE_ENV               # 2026.11.13: print the exported value of one key
+mise unset NODE_ENV             # Remove (from EVERY [[env]] group that sets it)
 mise env                        # Export all
 mise env --json                 # Export as JSON
 mise env --json-extended        # JSON with source + tool attribution
-mise env --dotenv               # Export as dotenv
+mise env --dotenv               # Export as dotenv — values quoted/escaped when needed (2026.11.6);
+                                # Docker --env-file reads those quotes as part of the value
 mise env --redacted             # Show only redacted variables
 mise env --values               # Show only values
 mise env -s bash                # Shell-specific output
 mise env --paths                # 2026.10.11: PATH entries mise manages, in PATH order
 ```
+
+> Since 2026.11.13 `mise set`/`mise unset` work on files using `[[env]]` groups or an inline `env = { … }` (they used to panic): `set` rewrites the entry that takes effect.
 
 > A `PATH` key in `[env]` is **ignored** by `mise exec`, `mise env`, and activated shells — use `_.path`.
 
@@ -289,7 +293,7 @@ Redaction requires a non-`raw` output mode — tasks with `raw = true` bypass in
 
 mise documents three approaches:
 
-1. **fnox (recommended)** — a separate [@jdx](https://github.com/jdx) project: a full secret manager with remote storage (1Password, AWS Secrets Manager) and remote encryption (AWS KMS). Two ways in: the native **`[secrets.fnox]` + per-task `secrets`** integration (**experimental**, 2026.10.4 — see [Task-Scoped Secrets](task-configuration.md#task-scoped-secrets-experimental)), or wrapping commands with `fnox exec -- mise ...`. The `mise-env-fnox` plugin / `_.fnox-env` directive are deprecated. Project grants can't use keys from your **personal** fnox config (2026.10.23, see the task-scoped secrets restrictions).
+1. **fnox (recommended)** — a separate [@jdx](https://github.com/jdx) project: a full secret manager with remote storage (1Password, AWS Secrets Manager) and remote encryption (AWS KMS). Two ways in: the native **`[secrets.fnox]` + per-task `secrets`** integration (**experimental**, 2026.10.4 — see [Task-Scoped Secrets](task-configuration.md#task-scoped-secrets-experimental)), or wrapping commands with `fnox exec -- mise ...`. The `mise-env-fnox` plugin / `_.fnox-env` directive are deprecated. Since 2026.11.12 tasks may list keys from your **personal** fnox config, and global/system tasks may list secrets (see the task-scoped secrets restrictions).
 2. **SOPS (experimental)** — encrypt entire files, load via `env._.file`.
 3. **Direct age (experimental)** — encrypt individual env vars inline in `mise.toml`.
 

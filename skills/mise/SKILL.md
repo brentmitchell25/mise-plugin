@@ -71,12 +71,12 @@ run = 'echo {{arg(name="x")}}'
 
 ## Overview
 
-> **Verified against mise 2026.11.5** (released 2026-11-09) and **usage-lib 7.3.0** (the version that mise bundles), using the live binary (`mise settings`, `mise --help`, `mise backends ls`, real `mise run` probes), the published JSON schema (`https://mise.jdx.dev/schema/mise.json`), the docs source at the `v2026.11.5` tag, mise's Rust source for deprecation dates, and the `jdx/mise` release notes for every release from 2026.10.4 to 2026.11.5. Where docs and release notes disagree, release notes win; where both disagree with the binary, the binary wins.
+> **Verified against mise 2026.11.13** (released 2026-11-23) and **usage-lib 7.4.0** (the version that mise bundles), using the live binary (`mise --help`, `mise backends ls`, `mise tasks info --json`, real `mise run` probes), the JSON schema and `settings.toml` at the `v2026.11.13` tag, the docs source at that tag (diffed against `v2026.11.5`), mise's Rust source for deprecation dates, and the `jdx/mise` release notes for every release from 2026.10.4 to 2026.11.13. Where docs and release notes disagree, release notes win; where both disagree with the binary, the binary wins.
 
 mise is an all-in-one developer environment tool that manages:
 
 - **Dev tools** — install and manage language runtimes, CLIs, and build tools (20 backends)
-- **Tasks** — project-specific commands with argument handling, dependencies, freshness checks, output caching, tags, cross-run locks, run history and logs, and JSON run reports
+- **Tasks** — project-specific commands with argument handling, dependencies (by name or tag), freshness checks, output caching, tags, cross-run locks and lock pools, run history and logs, and JSON run reports
 - **Environments** — manage env vars, configuration environments, dotenv files (with `find_up`), per-machine `[vars]` prompts, age/sops-encrypted values, and task-scoped fnox secrets
 - **Hooks** — run commands on directory changes, project enter/leave, tool install
 - **Daemons** — long-lived project services (databases, brokers, dev servers, Docker/Podman containers) supervised by pitchfork, startable as a task prerequisite
@@ -101,7 +101,7 @@ mise is an all-in-one developer environment tool that manages:
 - Cross-platform argument handling via `usage` spec
 - Hierarchical configuration with configuration-environment support
 - 20 tool backends (aqua, packslip, github, gitlab, forgejo, npm, cargo, pypi, etc.)
-- Security verification (cosign, SLSA, GitHub Attestations, minisign, packslip signer pinning, npm provenance) — all native, no external CLIs
+- Security verification (cosign, SLSA, GitHub Attestations, minisign, packslip signer pinning, npm provenance) — all native, no external CLIs — plus OSV vulnerability audits (`mise audit`)
 - Secret management (fnox, sops, age encryption)
 
 **Top-level `mise.toml` keys** (37; authoritative, from `https://mise.jdx.dev/schema/mise.json`):
@@ -123,20 +123,20 @@ The full reference lives in `references/`, one file per topic. Before writing or
 |------|-----------|--------|
 | [`references/task-definition.md`](references/task-definition.md) | Writing or moving a task (TOML task or file task) | TOML-Based Tasks (in mise.toml), File-Based Tasks (executable scripts), Configuring File Tasks from TOML, Task Grouping (Namespaces), Remote Tasks |
 | [`references/usage-spec.md`](references/usage-spec.md) | Adding arguments, flags, choices, validation, or completions to a task | Positional Arguments (arg), Flags (flag), Custom Completions (complete), Accessing Arguments in Scripts, File Task Headers… |
-| [`references/task-configuration.md`](references/task-configuration.md) | Setting any task field: depends, env, tools, tags, lock, timeout, extends, vars, secrets | All Task Fields, Structured run Array, Structured depends with Args/Env, Task Locks (lock), Task Templates (extends), Global Task Configuration… |
+| [`references/task-configuration.md`](references/task-configuration.md) | Setting any task field: depends, env, tools, tags, lock, timeout, extends, vars, secrets | All Task Fields, Structured run Array, Structured depends with Args/Env, Task Locks (lock) and Lock Pools, Task Templates (extends), Global Task Configuration… |
 | [`references/running-tasks.md`](references/running-tasks.md) | Running tasks, or explaining `mise run` / `mise watch` flags, output modes, tag selection, run reports, `--at`, or task history/logs | Commands, Execution Flags, Output Modes, Select Tasks by Tag, Run Reports, Run Tasks at Another Revision (--at), Task History and Logs, mise watch Flags… |
-| [`references/task-dependencies.md`](references/task-dependencies.md) | Ordering tasks, sources/outputs freshness, `skip_if`, redactions | Dependencies, Freshness with sources/outputs, Conditional Skip (skip_if), Redactions (Experimental), Error Handling |
+| [`references/task-dependencies.md`](references/task-dependencies.md) | Ordering tasks, tag dependencies, sources/outputs freshness, `skip_if`, redactions | Dependencies, Tag Dependencies, Freshness with sources/outputs (incl. `!@gitignore`), Conditional Skip (skip_if), Redactions (Experimental), Error Handling |
 | [`references/task-caching.md`](references/task-caching.md) | Caching task outputs locally or remotely | Local Artifact Cache, Cache Inputs, Remote Task Cache, Rust Compiler Action Cache — REMOVED (rust_cache is a no-op) |
 | [`references/task-tracing.md`](references/task-tracing.md) | Exporting task traces or logs over OpenTelemetry | Task Tracing with OpenTelemetry (Experimental) |
-| [`references/dev-tools.md`](references/dev-tools.md) | Adding or pinning tools, choosing a backend, lockfiles, shims, tool CLI commands | Backends Overview, TOML Syntax for Tools, Per-Tool Options, Backend-Specific Configuration, Lazy Tools… |
+| [`references/dev-tools.md`](references/dev-tools.md) | Adding or pinning tools, choosing a backend, lockfiles, shims, vulnerability audits, tool CLI commands | Backends Overview, TOML Syntax for Tools, Per-Tool Options, Backend-Specific Configuration, Lazy Tools, Lockfiles, Vulnerability Audit (mise audit)… |
 | [`references/environments.md`](references/environments.md) | Env vars, dotenv files, `MISE_ENV` profiles, secrets, Tera templates | Basic Variables, Special Directives (env._), Profiles / Configuration Environments (MISE_ENV), Required and Redacted Variables, Secrets (fnox, SOPS, age)… |
-| [`references/per-tree-identity.md`](references/per-tree-identity.md) | Pinning a different git/gh/npm/Claude Code account per directory tree, sourcing two scripts in one tree, or an AI agent shell ignoring a tree's `[env]` after `cd` | Layout, gh Token Script, Override Trees, Two `_.source` Scripts in One Tree, Git Identity (includeIf), npm and Claude Code Config per Tree, identity Task, Agent Shells and `--shims`… |
+| [`references/per-tree-identity.md`](references/per-tree-identity.md) | Pinning a different git/gh/npm/Claude Code account per directory tree, sourcing two scripts in one tree, or giving a coding agent's shell the right tools and `[env]` after `cd` | Layout, gh Token Script, Override Trees, Two `_.source` Scripts in One Tree, Git Identity (includeIf), npm and Claude Code Config per Tree, identity Task, Agent Shells (`SessionStart` `hook-env` hook, `--shims`)… |
 | [`references/hooks.md`](references/hooks.md) | Running commands on cd/enter/leave/install, or `watch_files` | Hook Types, Syntax, Watch Files, Hook Environment Variables, Per-Tool postinstall (not a hook) |
 | [`references/daemons.md`](references/daemons.md) | Declaring long-lived services or making tasks depend on them | Declaring Daemons, Tasks That Require Daemons, Groups, Namespaces, and Cross-Project Daemons, Shared Server Providers ([daemon_providers]), Service Presets… |
 | [`references/doctor.md`](references/doctor.md) | Adding project checks for `mise doctor project` | Project Diagnostics ([doctor]) |
 | [`references/wrappers.md`](references/wrappers.md) | Intercepting a command name before it reaches a tool | Command Wrappers ([wrappers]) |
-| [`references/sandboxing.md`](references/sandboxing.md) | Restricting a task's filesystem/network/env access, or handling untrusted configs | Sandboxing ([settings.sandbox]), Safe Mode (safe / MISE_SAFE=1), Paranoid Mode (paranoid / MISE_PARANOID), Trust |
-| [`references/bootstrap.md`](references/bootstrap.md) | Provisioning a machine, dotfiles, dotfile groups, dotfiles history | [bootstrap] Configuration, Remote Bootstrap over SSH ([bootstrap.remote]), Declarative Dotfiles ([dotfiles]), Dotfile Groups ([dotfile_groups]), Dotfiles History (mise dot / [history]) |
+| [`references/sandboxing.md`](references/sandboxing.md) | Restricting a task's filesystem/network/env/Unix-socket access, or handling untrusted configs | Sandboxing ([settings.sandbox]), Unix Sockets (deny_unix / allow_unix), Safe Mode (safe / MISE_SAFE=1), Paranoid Mode (paranoid / MISE_PARANOID), Trust |
+| [`references/bootstrap.md`](references/bootstrap.md) | Provisioning a machine, macOS preferences, settings plugins, dotfiles, dotfile groups, dotfiles history | [bootstrap] Configuration, Settings Plugins ([bootstrap.settings], Experimental), Remote Bootstrap over SSH ([bootstrap.remote]), Declarative Dotfiles ([dotfiles]), Dotfile Groups ([dotfile_groups]), Dotfiles History (mise dot / [history]) |
 | [`references/oci.md`](references/oci.md) | Building or pushing container images with mise tools | OCI Container Images |
 | [`references/settings.md`](references/settings.md) | Config file hierarchy, includes, settings, `min_version`, env vars, CI, editors and `mise lsp`, MCP | File Hierarchy, Remote Config Includes (include), Idiomatic Version Files, Key Settings Reference, Minimum Version… |
 | [`references/deps.md`](references/deps.md) | Project dependency installation with `[deps]` | Dependency Preparation ([deps]) |
@@ -160,7 +160,8 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Use `depends` for task ordering; structured `depends` to pass args/env; `optional = true` for globs that may match nothing
 - Use `confirm` for destructive operations
 - Use `lock = "<resource>"` for tasks that share a database, simulator, or port across worktrees and parallel `mise run`s, instead of hand-rolled lockfiles or `flock`; `lock = true` serializes one task per repo
-- Tag tasks (`tags = ["lint"]`) and select them with `mise run --tag lint` instead of maintaining wildcard-name conventions or aggregate tasks
+- Cap CPU- or memory-heavy tasks machine-wide with a lock pool — `task.lock_pools.cpu = "8"` in **global** config, `lock = { name = "cpu", count = 4 }` per task — and use `if_pool = true` to join a pool only where a machine declares it
+- Tag tasks (`tags = ["lint"]`) and select them with `mise run --tag lint` instead of maintaining wildcard-name conventions or aggregate tasks; depend on them with `depends = [{ tag = "lint" }]` instead of listing every lint task
 - Use `--output summary` (or `MISE_TASK_OUTPUT=summary`) in agent shells and CI — one line per passed task, full output only for failures; add `--report-file` when a tool needs the results as JSON
 - Check `mise tasks history --summary` for slow or flaky tasks, and turn on `task.logs` to keep each task's last output for `mise tasks log <task>`
 - Compare against another revision with `mise run --at main bench` (plus `--at-setup` for ignored files) instead of stashing and checking out by hand
@@ -169,7 +170,7 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Nest `complete` inside its `arg` (`arg "<svc>" { complete run="…" }`) — it keeps the completer beside its arg and wins over a same-named top-level `complete`
 - Give a relationship several targets with the child-node form — `flag "--a" { conflicts "--b" "--c" }`, never `conflicts="--b --c"`
 - Wrap usage-time templates in TOML `usage` strings with `{% raw %}…{% endraw %}` (`{{ words[PREV] }}`), and branch on `$usage_cmd` for subcommands
-- Run `mise tasks validate` in CI — one broken spec silently breaks tab-completion for every task (it also flags `secrets` without `[secrets.fnox]`, secret/sandbox/env conflicts, and missing `daemons`; it does **not** catch `clause` or inline `choices`)
+- Run `mise tasks validate` in CI — a broken spec silently drops its task's arguments and completion (it also flags `secrets` without `[secrets.fnox]`, secret/sandbox/env conflicts, and missing `daemons`; it does **not** catch `clause` or inline `choices`)
 - Group related tasks with namespaces (e.g., `test:unit`, `test:e2e`)
 - Share task config via `[task_templates]` + `extends`
 - Set a project-wide default shell with `task_config.shell` (project-local `*_default_*_shell_args` are ignored since 2026.7.14)
@@ -182,12 +183,12 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Set `expand = true` on a structured env file only when you actually want shell expansion
 - Redact sensitive values with `redact = true`; use fnox, SOPS, or direct-age for secrets
 - Use templates for dynamic values instead of hardcoding paths
-- Use shims in `.zprofile`/`.bash_profile` and PATH activation in `.zshrc`/`.bashrc`, but `mise activate <shell> --shims` when `CLAUDECODE` is set: an agent shell snapshotted at session start never re-runs `hook-env`, so a later `cd` ignores that tree's `[env]` ([per-tree identity](references/per-tree-identity.md#ai-agent-shells-ignore-the-tree-after-cd))
+- Use shims in `.zprofile`/`.bash_profile` and PATH activation in `.zshrc`/`.bashrc`. For Claude Code, add mise's `SessionStart` hook that appends `eval "$(mise hook-env -s bash)"` to `$CLAUDE_ENV_FILE`, so every agent command follows `cd` into a tree's tools and `[env]`; fall back to `mise activate <shell> --shims` for agents without such a hook ([agent shells](references/per-tree-identity.md#ai-agent-shells-ignore-the-tree-after-cd))
 - Use `[tool_alias]` (not deprecated `[alias]`)
 - Pin tool versions with `mise.lock`; prefer **`[tool_config] locked = true`** for config-root scope over the invocation-wide `locked` setting
 - Remember `minimum_release_age` is **already on at 24h** by default for **every** backend (2026.10.15); raise it (e.g. `"7d"`) to harden, or set `"0s"` to opt out — don't assume unset means off
 - Use `group` to express "exactly one of these flags" instead of hand-rolling the check in the script
-- Use `version_order = "semver"` on aqua/github/gitlab/forgejo/http tools whose releases include backport lines
+- Use `version_order = "semver"` on aqua/github/gitlab/forgejo/http tools whose releases include backport lines, and `"published_at"` (github/gitlab/forgejo) for `prerelease = true` repos whose tags don't sort
 - Use `mise lock --bump` to advance fuzzy selectors without touching `mise.toml`
 - Use `jdx/mise-action@v5` in GitHub Actions — it handles masking and `--locked` automatically; pin `version:` (or set `minimum_release_age`) knowing v5 waits 24h for new mise releases, and set `persist_github_token: true` only if later steps need the token
 - Use `MISE_SAFE=1` when reading configs you don't control (fork PRs, untrusted repos, lockfile bots)
@@ -206,19 +207,25 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Commit the `.mise/locks/` sidecar directory alongside a revision-2+ `mise.lock` (`mise lock --sidecars` lists it)
 - Put any task field except `run`/`run_windows`/`file`/`usage` straight into `#MISE` headers (2026.10.14+); use a metadata-only `[tasks.<name>]` block only when older mise must also honor `timeout`/`vars`/sandbox fields
 - Share tools/env/hooks across repos with a top-level `include = ["git::…?ref=<sha>"]` and tasks with `task_config.includes = ["oci::…@sha256:…"]` — pin by SHA/digest
-- Retire a managed dotfile with `mode = "absent"` rather than deleting its entry; organize Stow-style trees as `[dotfile_groups]` selected per machine
+- Retire a managed dotfile with `mode = "absent"` rather than deleting its entry; organize Stow-style trees as `[dotfile_groups]` selected per machine; set `main_checkout = true` on symlinks whose source lives in a git worktree
+- Write macOS preferences as `[bootstrap.settings.macos.*]` (2026.11.8) once every machine runs that mise — older mise ignores the new spelling; launchd agents stay under `[bootstrap.macos.launchd.agents]`
+- Use unprefixed `[bootstrap.packages]` keys (`git = "latest"`, with `names = { apt = …, dnf = … }`) for cross-distro setups, and `system_packages.prefer` to choose the manager
 - Use a global `[daemon_providers]` server when many checkouts each need a database
 - Replace `[bootstrap].config_roots` bundles with `conf.d` folder fragments
 - Use `task_config.excludes` to keep stray executables out of file-task discovery
 - Put shared task flags in a `[task_templates]` `usage` and let extending tasks add their own — since 2026.9.11 the two **merge**, so stop copying flags into every task
 - Use `#MISE extends="<template>"` in file tasks to inherit tools/env/vars/usage (the template's `run` is ignored there — the script is the command)
 - Use `skip_if` for "already done?" probes (workspace exists, image pushed) instead of hand-rolled early exits in the script
+- Add `"!@gitignore"` after broad `sources` globs so build artifacts and other ignored, untracked files don't make a task stale
 - Grant credentials per task with `[secrets.fnox]` + `secrets = [...]` (experimental) instead of exporting them into `[env]` for every task
 - Attach `mise lsp` to TOML files in your editor and run `mise config explain` to catch unknown/deprecated keys — unknown tool options now **fail installs**
 - Put personal overrides that must beat every project (`AWS_PROFILE`, a pinned tool) in `~/.config/mise/config.override.toml` (`--override`)
 - Collect per-developer values with `[vars.x] prompt = "…"` + `mise vars prompt` rather than asking people to edit `mise.local.toml`
 - Keep global CLIs current with `auto_update` / `tool_update.global_auto` in **global** config (never in a project)
-- Run `mise lock` before `--locked` CI — since 2026.11.0 locked mode fails on any URL entry without a checksum
+- Run `mise lock` before `--locked` CI — since 2026.11.0 locked mode fails on any URL entry without a checksum — and gate PRs with the offline `mise lock --check` (not `--dry-run`, which now hits the network)
+- Gate CI on `mise audit` (exits 1 on OSV advisories; tools it can't check are listed, never passed as clean) and fix with `mise upgrade --vulnerable`
+- Restrict a locked-down machine to trusted backends with `enable_backends = ["core", "aqua", "github"]` rather than enumerating `disable_backends`
+- Set `bump = false` on tools that must stay on their line (e.g. `node = { version = "lts", bump = false }`) so `mise upgrade --bump` leaves them alone
 - Keep `npm.provenance` on (the default since 2026.11.1); commit the `provenance = { repository = … }` pins `mise install` writes into `mise.lock`
 - Name groups of configuration environments with `[env_sets]` in a shared `miserc.toml` and select one name per machine
 - Order dependent dotfiles with `depends` (an `fnox` entry that needs a key a group writes first)
@@ -251,7 +258,10 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Assume the old usage 4.x limits still apply — `flag { alias }`, `required_if`, `required_unless`, `overrides`, `conflicts`, and `requires` all work under v6, and `double_dash="required"` is now enforced
 - Expect `arg "<start> <end>"` fixed arity to produce two env vars — both values land in the first
 - Write a `usage` spec that is only a `mount` — with no `arg`, `flag`, or `cmd`, mise ignores the spec at run time (TOML and file tasks); add an arg/flag or put the mount in a `cmd`
-- Give a relationship property several targets (`conflicts="--b --c"`) or repeat it — it's a load-time error on mise 2026.11.5 (usage 7.1.5+) and silently mis-enforced before that; use the child-node form
+- Give a relationship property several targets (`conflicts="--b --c"`) or repeat it — it's a load-time error (usage 7.1.5+, bundled since 2026.11.x) and silently mis-enforced before that; use the child-node form
+- Rely on a subcommand to skip a parent's `required`/`requires`/`conflicts` flag rules — since usage 7.4.0 (mise 2026.11.10) they're enforced under subcommands (`subcommand_negates_reqs #true` still relaxes `required`/`requires`)
+- Write `depends = ["tag:lint"]` — it's looked up as a task name; use `depends = [{ tag = "lint" }]`
+- Set `deny_unix`/`allow_unix` on tasks that run on macOS or Linux < 7.1 — the task fails before it runs (Windows warns and runs unrestricted)
 - Put `run`, `run_windows`, `file`, or `usage` in a `#MISE` header — they are ignored with a warning (use `#USAGE` lines for args)
 - Put `redactions` inside `[tasks.x]` — it's a top-level key only; in a task it is a parse error
 - Assume `sources` freshness ignores gitignored files — it doesn't (only `mise watch` does)
@@ -301,14 +311,16 @@ The full reference lives in `references/`, one file per topic. Before writing or
 - Set `PATH` in `[env]` — it's ignored; use `_.path`
 - Write two `_.source` keys in one `[env]` table — it's a TOML duplicate-key error that rejects the whole file (every shim in the tree fails); use `_.source = [{ path = … }, { path = … }]` or `[[env]]` blocks, and keep env blocks above the first `[tasks.*]` header
 - Name a structured env file `.env.yml` — only `.json`/`.yaml`/`.toml` are structured; `.yml` is parsed as dotenv
-- Use `state = "absent"` on `apt:`/`brew:`/`choco:`/… packages — only pacman, scoop, snap, zypper (and dnf on rpm-ostree with `ostree = "layer"`) remove
+- Use `state = "absent"` on `apt:`/`brew:`/`choco:`/… packages — only pacman, scoop, snap, zypper, macports (and dnf on rpm-ostree with `ostree = "layer"`) remove
 - Put `encrypt = true` on symlink/copy/template dotfile entries — it applies to `mode = "track"` only
 - Use the old `auto_update`/`auto_update_check_duration` settings — they're `self_update.auto`/`self_update.check_duration` now (the per-tool `auto_update` option is a different feature)
 - Rely on a `.config/mise.toml`-relative `exec()`/`read_file()` resolving from the project root — they run in the config file's directory
 - Assume a hook's `mise run`, a shim, `--help`, or an MCP call will trust a project for you (2026.10.19)
 - Set `lockfile_mode = "merge"` — deprecated (warns from 2027.4.0, removed 2027.10.0); delete the line
 - Set `system_packages.elevate_with`, `extra_ca_certs`, or `ruby.apply_patches` in a project `mise.toml` — they are global-only and ignored with a warning
-- Expect a project task to receive a key from your **personal** fnox config (`~/.config/fnox/config.toml`, or a `fnox.toml` in/above `$HOME`) — it's refused; define it in the project's `fnox.toml` or pass `--secrets NAME`
+- List `secrets` on a remote (`git::`/`oci::`/`zip::`) task — it's refused; personal fnox keys and global-config tasks are fine since 2026.11.12, but `--secrets-all` still omits personal keys the task doesn't name
+- Set `MISE_USE_TOML=0` — deprecated (removed 2027.11.0); use `mise use --path .tool-versions` or `MISE_GLOBAL_CONFIG_FILE=~/.tool-versions`
+- Pin Temurin hotfixes in the old encoded form (`temurin-25.0.4+101`) — since 2026.11.12 it's `temurin-25.0.4.1+1`
 - Use `--local` / `-l` on `ls`, `outdated`, `upgrade`, or `tasks ls` — deprecated in favor of `--no-global` (removed 2027.7.0)
 - Re-run `mise tasks add` on an existing name without `--force` — replacing a different task that way is deprecated (refused from 2028.5.0)
 - Confuse `mise tasks add -e/--env <ENV>` (writes `mise.<ENV>.toml`, loaded only with `MISE_ENV`) with `--env-var KEY=VALUE` (the task's `env`)

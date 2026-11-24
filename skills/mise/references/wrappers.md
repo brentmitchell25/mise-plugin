@@ -28,6 +28,17 @@ env = { MBX_CARGO_SHIM_MODE = "1" }
 
 Works with normal activation, `mise activate --shims`, and `mise exec`, and (since 2026.9.15) through Windows exe/file shims. Managed wrapper shims are refreshed by `mise reshim`. Since **2026.9.13** a wrapper **installs a missing provider tool before dispatching** (lazy providers always; others when `not_found_auto_install` is on, the default). Wrappers chain (2026.10.23): a `node` started by a wrapped `pnpm` gets the `node` wrapper's `args`/`env`, a wrapper whose `command` is itself wrapped runs that wrapper too, and two wrappers that delegate to each other end at the real tool. A real command reachable **only** through a project `[env] _.path` dir fails with `<cmd> is not a valid shim` (observed on 2026.10.25) — put it on the inherited `PATH` or make it a mise tool. A remote [`include`](settings.md#remote-config-includes-include) fragment may carry `[wrappers]`; the including file's entry wins. Safe mode ignores project `[wrappers]`. Docs: `https://mise.jdx.dev/dev-tools/shims.html#command-wrappers`.
 
-> 🔴 **`command`, `args`, and `env` are Tera templates (2026.10.13, breaking).** A literal `{{` must be wrapped in `{% raw %}…{% endraw %}`. `command` sees only `vars`, `config_root`, `config_source` (2026.10.14), and the process env.
+> 🔴 **`command`, `args`, and `env` are Tera templates (2026.10.13, breaking).** A literal `{{` must be wrapped in `{% raw %}…{% endraw %}`. `command` sees only `vars`, `config_root`, `config_source` (2026.10.14), and the process env. Relative paths in functions such as `read_file` resolve from the declaring file's directory.
+
+**`argv` in `args`/`env` (2026.11.8)** — the list of arguments the user typed after the command name (not the wrapper's own `args`), so a wrapper can branch on them. Indexing an empty list is not an error; `command` can't use `argv`; the user's arguments are still forwarded after the wrapper's `args`:
+
+```toml
+[wrappers.rails]
+command = "bundle"
+args = ["exec", "rails"]
+env = { RAILS_ENV = "{{ 'test' if argv | length > 0 and argv[0] == 'test' else 'development' }}" }
+```
+
+Verified on 2026.11.13 with an `args` template (`greet test` → branch taken, `greet x` → default). Limitation: the `cargo`, `npm`, and `pipx` backends run their install commands **without** wrappers on PATH, so a `cargo` wrapper doesn't intercept `cargo install` for `cargo:` tools; `mise which` doesn't resolve wrapper names.
 
 > Related: `activate_shims = false` (`MISE_ACTIVATE_SHIMS`, default `true`, added 2026.9.2) keeps tool shim directories off PATH during activation and hooks without changing auto-install or lazy-tool settings — which lets external command wrappers keep working.

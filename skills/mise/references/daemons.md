@@ -75,7 +75,7 @@ port = 5433
 | `proxy_tls` | enum | `terminate` \| `passthrough`. |
 | `proxy_idle_timeout` | duration \| `false` | **2026.9.18** (pitchfork ≥ 2.27.0). Stop a **proxy-started** daemon after this long without traffic (`"30m"`, `"1h"`). Explicit starts (`mise daemons start`, shell hook, `boot_start`) and their deps are exempt; dependencies without their own value inherit the requester's; `false` (or `"0"`) exempts even from a global default (`PITCHFORK_PROXY_IDLE_TIMEOUT`). Open connections count as activity; direct-port traffic does not. |
 
-Readiness is configured with pitchfork's own fields (`ready_port`, `ready_cmd`, `health_cmd`, `auto`, …). Since 2026.10.5 `ready_cmd`/`health_cmd` run **through `mise x`** (so project tools are on PATH) and may be argument arrays; `depends` references are rewritten to full daemon IDs. `auto = ["start", "stop"]` starts/stops daemons with the shell (needs `experimental` in **global** config). A preset daemon also accepts a `tool` key. Readiness checks apply **after** `init`, so anything waiting on the daemon also waits for setup.
+Readiness is configured with pitchfork's own fields (`ready_port`, `ready_cmd`, `health_cmd`, `auto`, …). Since 2026.10.5 `ready_cmd`/`health_cmd` run **through `mise x`** (so project tools are on PATH) and may be argument arrays; `depends` references are rewritten to full daemon IDs. `auto = ["start", "stop"]` starts/stops daemons with the shell (needs `experimental` in **global** config). A preset daemon (and a `[daemon_providers]` entry) also accepts `tool`, which installs the server from a different tool than the preset's default. Readiness checks apply **after** `init`, so anything waiting on the daemon also waits for setup.
 
 > **Minimum pitchfork versions:** 2.25.0 base · 2.26.0 proxy · 2.27.0 `proxy_idle_timeout` · 2.28.0 task daemons · 2.30.0 `{{ env.X }}`/`{{ vars.X }}` in `run`. Docs split into `/daemons/{data,presets,sharing,worktrees}.html`.
 
@@ -141,7 +141,9 @@ run = "npm run dev"
 depends = ["pipeline"]
 ```
 
-The referenced checkout must already be **trusted** — `mise run` and `mise daemons start` never trust it for you. A reference table accepts only `project` and `name`, and cannot point at another reference. The imported daemon runs in *its own* project's environment, so a preset's `DATABASE_URL` does **not** join your application's environment. A missing or untrusted checkout drops the import rather than breaking the rest of your config; naming it explicitly fails with the reason.
+A reference **exports the daemon's port and URL under the reference's name** (2026.11.12): `pipeline` above exports `PIPELINE_PORT` and, when the daemon has a stable or declared URL, `PIPELINE_URL` — same folding rules as local `<NAME>_PORT`/`<NAME>_URL`, and a variable one of your own daemons already exports keeps its value. With the reference in a daemon's `depends`, `{{ daemons.pipeline.url }}` works in `run`, `ready_cmd`, and `env` (pitchfork ≥ 2.36.0). Preset connection vars (`DATABASE_URL`, `NATS_URL`) still stay in the defining project.
+
+The referenced checkout must already be **trusted** — `mise run` and `mise daemons start` never trust it for you. A reference table accepts only `project` and `name`, and cannot point at another reference. The imported daemon runs in *its own* project's environment, so a preset's `DATABASE_URL` does **not** join your application's environment (only the reference's `<REF>_PORT`/`<REF>_URL` do). A missing or untrusted checkout drops the import rather than breaking the rest of your config; naming it explicitly fails with the reason.
 
 ### Shared Server Providers (`[daemon_providers]`)
 
@@ -264,6 +266,21 @@ There are **511 worktree offsets**. With defaults, PostgreSQL uses 5433–5943 i
 
 Custom daemons with a port export `<NAME>_PORT` (uppercased, punctuation → underscores): `[daemons.api]` → `API_PORT`, `[daemons.web-ui]` → `WEB_UI_PORT`. Names that would collide (`web-ui` vs `web_ui`, or any two non-preset daemons that would export the same `*_PORT`, such as `api` with `ports.http` and a daemon named `api-http`) or start with a digit get no variable and a warning — the daemon still runs, and pitchfork still injects `$PORT`. Independent clones and non-Git projects keep the base port; worktrees of a bare repo all get offsets.
 
+**Named ports on custom daemons (2026.11.6)** — a `run`/`task` daemon (e.g. a Docker Compose stack) can declare several ports; an allocated one needs its own `base`:
+
+```toml
+[daemons.stack]
+run = "docker compose up"
+ports.app = { auto = true, base = 8080 }
+ports.db = { auto = true, base = 5432 }
+ports.admin = 9000                       # an integer is used exactly as written
+
+[env]
+APP_PORT = "{{ env.STACK_APP_PORT }}"    # exported as <DAEMON>_<NAME>_PORT before the daemon starts
+```
+
+Each linked worktree adds the same slot to every auto port, and named ports join the same collision checks: mise warns when a worktree slot moves one port onto a number the primary checkout uses for another, and on start it checks named ports against daemons other checkouts are running.
+
 **Preset named ports (2026.9.18)** export as `<NAME>_<PORT_NAME>`: a `cockroachdb` daemon named `crdb` exports `CRDB_HTTP_PORT`; a `spicedb` named `authz` exports `AUTHZ_HTTP_PORT` and `AUTHZ_METRICS_PORT` — the port actually used (default, worktree offset, or `ports.<name>`).
 
 **Stable URLs per worktree:** every proxied daemon (has a `port`, not `proxy = false`) also exports **`<NAME>_URL`** — its hostname URL, which never changes when a port moves — so services can point at each other without port arithmetic:
@@ -276,6 +293,18 @@ port = { auto = true, base = 3000 }
 [env]
 APP_BASE_URL = "{{ env.API_URL }}"
 ```
+
+**Declare a URL (2026.11.13, needs pitchfork ≥ 2.36.0)** for a daemon the proxy doesn't serve (`proxy = false`, no `port`, or a hostname collision) — a template over `port`, `ports`, and `name` that mise exports as `<NAME>_URL` (any other variable exports nothing and warns):
+
+```toml
+[daemons.cache]
+run = "exec redis-server --port $PORT"
+port = 6380
+proxy = false
+url = "redis://127.0.0.1:{{ port }}/0"   # → CACHE_URL; pitchfork also sees {{ daemons.cache.url }}
+```
+
+`proxy_tls` with `proxy = false` or without a `port` is an error.
 
 Set `proxy = false` on any custom daemon that doesn't speak HTTP (**every preset** opts out already and keeps exporting its connection vars such as `PGPORT`/`DATABASE_URL`/`REDIS_URL`). When a port is taken, mise's warning names the daemon, the port, and whether it is the base or a worktree offset.
 

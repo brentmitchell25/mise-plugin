@@ -6,6 +6,7 @@
 - [Structured run Array](#structured-run-array)
 - [Structured depends with Args/Env](#structured-depends-with-argsenv)
 - [Task Locks (lock)](#task-locks-lock)
+  - [Lock Pools (task.lock_pools)](#lock-pools-tasklock_pools)
 - [Task Templates (extends)](#task-templates-extends)
 - [Global Task Configuration](#global-task-configuration)
 - [Task-Scoped Secrets (Experimental)](#task-scoped-secrets-experimental)
@@ -37,7 +38,7 @@
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `depends` | `string \| {task, args?, env?, optional?} \| (string \| string[] \| {task, args?, env?, optional?})[]` | — | Tasks to run BEFORE. An inner `string[]` is `[task, ...args]` (non-empty). A **single table** is accepted (2026.10.7): `depends = { task = "build", args = ["x"] }`. Parallel by default. |
+| `depends` | `string \| {task?, tag?, args?, env?, optional?} \| (string \| string[] \| {task?, tag?, args?, env?, optional?})[]` | — | Tasks to run BEFORE. An inner `string[]` is `[task, ...args]` (non-empty). A **single table** is accepted (2026.10.7): `depends = { task = "build", args = ["x"] }`. `{ tag = "lint" }` / `{ tag = ["test", "slow"] }` depends on every task with that tag (2026.11.9; see [Tag Dependencies](task-dependencies.md#tag-dependencies)). Parallel by default. |
 | `depends_post` | same as `depends` | — | Tasks to run AFTER this task. Runs if the parent **started** (even if it failed), but is **skipped when a regular dependency fails** before the parent starts. |
 | `wait_for` | same as `depends` | — | Wait for tasks without adding them as deps. A `wait_for` naming a **nonexistent task errors** unless `optional = true`. |
 
@@ -60,7 +61,7 @@
 | `raw` | `bool` | `false` | Direct stdin/stdout connection. Takes an **exclusive lock per command** (nothing else runs alongside each of its commands; other tasks can run between them). Does **not** set jobs=1 — that is `mise run --raw`. Bypasses redactions and the artifact cache; not stopped by the whole-run timeout. |
 | `raw_args` | `bool` | `false` | Pass all args verbatim including `--help`/`-h` to underlying command |
 | `interactive` | `bool` | `false` | Exclusive lock held from the task's first to its last script command — every other task waits (verified; the schema description saying others "still run in parallel" is wrong). The lock is **released while a `{ task }`/`{ tasks }` run step executes**. Bypasses redactions and the artifact cache. |
-| `lock` | `bool \| string \| string[]` | — | **2026.11.0 (stable).** Named resources held while the task's commands run; other runs needing the same lock wait. See [Task Locks](#task-locks-lock). |
+| `lock` | `bool \| string \| {name, count?, if_pool?} \| (string \| {name, count?, if_pool?})[]` | — | **2026.11.0 (stable).** Named resources held while the task's commands run; other runs needing the same lock wait. Slot counts (`count`) 2026.11.9, `if_pool` 2026.11.11. See [Task Locks](#task-locks-lock). |
 | `skip_if` | `string` | — | **2026.10.10.** Shell command run **after `depends`, before `confirm`**, in the task's dir/shell/env/sandbox. **Exit 0 ⇒ the task is skipped** (prints `[x] skip_if condition met, skipping`) and counts as success; any other exit runs the task. Output discarded, no stdin, no `secrets`; shares the task `timeout` (failure to start / timeout ⇒ task fails). Tera-rendered (`usage.*` available); works in `#MISE` headers. `--force` bypasses it; `--dry-run` prints `skip_if: … (not checked: dry run)`. A skipped task does **not** invalidate dependents. |
 
 #### Output Control
@@ -75,7 +76,7 @@
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `sources` | `string \| string[]` | — | Input files (globs, `{a,b}` braces, `!` exclusions, `@group:name` refs) |
+| `sources` | `string \| string[]` | — | Input files (globs, `{a,b}` braces, `!` exclusions, `@group:name` refs, `!@gitignore` to drop git-ignored untracked files — 2026.11.10, see [Freshness](task-dependencies.md#freshness-with-sourcesoutputs)) |
 | `outputs` | `string \| string[] \| {auto: bool}` | `{auto: true}` (if `sources` set) | Generated files. Supports ordered `!` exclusions. `outputs = []` enables result-only caching. `{ auto = false }` is accepted and means the same as unset (2026.10.8). |
 | `cache` | `{enabled, audit, env, command_inputs}` | `{enabled=false, audit=false, env=[], command_inputs=[]}` | **Experimental.** Task output artifact cache — see [Task Output Caching](task-caching.md#task-output-caching-experimental). |
 | `rust_cache` | `bool \| {enabled?, verify?}` | `false` | 🔴 **Deprecated NO-OP** (removal 2027.8.14); an enabled value prints a migration warning. Use [mbx](task-caching.md#rust-compiler-action-cache--removed-rust_cache-is-a-no-op). |
@@ -88,11 +89,13 @@
 | `confirm` | `string \| {message, default?, yes?, no?}` | — | Prompt before running. `default` (optional since 2026.10.3, defaults to yes) accepts `yes`/`no`/`y`/`n`/`true`/`false`; `yes`/`no` are display labels (2026.10.3). All support Tera with `usage.*`. **Guards only `run`, not `depends`.** `-y/--yes` skips it; with **no TTY at all** (CI, agent shells) it fails: `task requires confirmation but there was nobody to ask; pass --yes to accept`. |
 | `deny_all` | `bool` | `false` | Block reads, writes, network, and env inheritance |
 | `deny_read` / `deny_write` / `deny_net` / `deny_env` | `bool` | `false` | Individual sandbox blocks |
+| `deny_unix` | `bool` | `false` | **2026.11.9.** Block Unix-socket connections except those in `allow_unix`. **Linux 7.1+ only** — older kernels and macOS fail before the task runs; Windows warns and runs unrestricted. Not implied by `deny_all`. See [Unix Sockets](sandboxing.md#unix-sockets-deny_unix--allow_unix) |
 | `allow_read` / `allow_write` | `string[]` | — | Path allowlists |
 | `allow_net` | `string[]` | — | Host allowlist |
+| `allow_unix` | `string[]` | — | **2026.11.9.** Sockets (or directories of sockets) a task may connect to; implies `deny_unix`. Same platform support |
 | `allow_env` | `string[]` | — | Env var allowlist (wildcards: `NODE_*`) |
 
-These are **flat top-level task fields**, not a nested `sandbox` table.
+These are **flat top-level task fields**, not a nested `sandbox` table. In a `#MISE` header a mistyped `confirm`, `lock`, `deny_*`, or `allow_unix` value is an **error** (other wrong-typed header fields only warn and are ignored), so a typo can't silently drop a prompt, lock, or restriction.
 
 > 🔴 **`redactions` is NOT a task field.** `[tasks.x] redactions = [...]` is a hard parse error (`unknown field 'redactions'`). It is a **top-level** key only — see [Redactions](task-dependencies.md#redactions-experimental).
 
@@ -177,15 +180,49 @@ run = "./scripts/migrate.sh"
 
 | Value | Meaning |
 |-------|---------|
-| `"name"` / `["a", "b"]` | Machine-wide named locks. Names must be non-empty and contain no commas. Several are taken in **sorted** order. |
+| `"name"` / `["a", "b"]` | Machine-wide named locks. Names must be non-empty, contain no commas or control characters, and not end in `:<number>`. Several are taken in **sorted** order. |
+| `{ name = "cpu", count = 4 }` | **2026.11.9.** Takes 4 slots of a lock with several (see [Lock Pools](#lock-pools-tasklock_pools)). Mixes with strings: `[{ name = "cpu", count = 4 }, "test-db"]` |
+| `{ name = "xcode", if_pool = true }` | **2026.11.11.** Takes the lock **only on machines whose `task.lock_pools` declares that name**; elsewhere the task runs without it. Combines with `count` |
 | `true` | A lock scoped to this task in this repo (`task:<hash>`), shared by all its worktrees |
 | `false` / `[]` | No lock — turns off a lock inherited from a template |
+
+Lock names are Tera templates, so a name can be scoped to one project instead of the whole machine: `lock = "package-lock-{{ config_root | hash(len=8) }}"` (renders e.g. `package-lock-f7a777b2`; an empty render is an error).
 
 - **When it's taken:** after `depends` finish and after mise decides the task must run — a task skipped by `skip_if`, fresh `sources`, or a cache restore never waits. Held until the task's last command ends, including `{ task = … }` run steps.
 - **Waiting:** the waiting task gives up its `--jobs` slot and prints `[t] waiting for lock L, held by <task> in <dir> (pid N, for 2.0s)`. Without a limit it waits forever; `mise run --lock-timeout 5m` or the `task.lock_timeout` setting fails it instead (`timed out after 5m waiting for lock L`). The task `timeout` clock starts once locks are held, but `mise tasks history` durations include the wait.
 - **Nesting:** a nested `mise run` or `{ task }` step inherits the parent's locks and may add only locks that sort **after** the inherited ones (otherwise it fails, preventing deadlock). Two tasks in one run that share a lock run one after the other.
+- **All or nothing:** a task takes its locks, its `--jobs` slot, and its share of the terminal together, and keeps them until it ends; tasks started by its `{ task }`/`{ tasks }` run steps run under that slot and take none of their own.
 - **Terminal:** a locked task that isn't `interactive` shares the terminal, so its subtasks can't prompt (secrets prompts, interactive subtasks fail) — set `interactive = true` on the locked task if they must.
-- The task sees `MISE_TASK_LOCKS` (comma list, sorted, inherited locks included). `mise tasks info` and `mise run --dry-run` show locks. Works in `#MISE lock="test-db"` headers.
+- The task sees `MISE_TASK_LOCKS` (comma list, sorted, inherited locks included; set only when the task holds a lock). `mise tasks info` (`--json` has a `lock` field since 2026.11.9) and `mise run --dry-run` show locks. Works in `#MISE lock="test-db"` headers. Templates pass `lock` down unless the task sets its own.
+
+#### Lock Pools (`task.lock_pools`)
+
+A lock is a pool of slots; by default every name has **one**. Give a name more slots once per machine in **global** config, and let each task take the share it needs (2026.11.9):
+
+```toml
+# ~/.config/mise/config.toml
+[settings.task.lock_pools]
+cpu = "8"        # whole numbers, written as strings
+xcode = "2"
+```
+
+```toml
+[tasks.lint]
+lock = "cpu"                                       # one slot
+run = "eslint ."
+
+[tasks.test]
+lock = [{ name = "cpu", count = 4 }, "test-db"]    # four slots + an exclusive lock
+run = "pytest -n 4"
+
+[tasks."build:ios"]
+lock = { name = "xcode", if_pool = true }          # serialize only where a pool exists
+run = "xcodebuild"
+```
+
+- `mise settings set task.lock_pools.cpu 8` / `mise settings unset task.lock_pools.cpu` edit one pool; `MISE_TASK_LOCK_POOLS=cpu=8,gpu=1` (or a JSON object) sets them for one command.
+- A task gets **all** its slots or none, and waiters aren't queued in order. A `count` above the pool size is **lowered to it** — with no pool, `count = 4` takes the single slot (verified).
+- Slots appear in `MISE_TASK_LOCKS` as `cpu`, `cpu:1`, `cpu:2`, … (why names can't end in `:<number>`).
 
 ### Task Templates (`extends`)
 
@@ -211,10 +248,10 @@ run = "pytest --cov"       # overrides the template's run
 | Behavior | Fields |
 |----------|--------|
 | **Full override** (task wins, no merging) | `run`, `run_windows`, `depends`, `depends_post`, `wait_for`, `sources`, `outputs`, `cache`, `output`, `alias` |
-| **Override if set locally** | `dir`, `description`, `shell`, `timeout`, `silent`, `confirm`, `watch`, `daemons`, `file` (`run` is ignored when either side sets `file`) |
+| **Override if set locally** | `dir`, `description`, `shell`, `timeout`, `silent`, `confirm`, `watch`, `daemons`, `lock`, `skip_if`, `file` (`run` is ignored when either side sets `file`) |
 | **Deep merge** (per key; task wins) | `tools`, `env`, `vars` |
 | **Concatenated** | `usage` — **template's flags first, then the task's** (2026.9.11+) |
-| **Compose / combine** | sandbox `deny_*` compose; `allow_*`, `pass_through_env`, and `tags` combine (template's entries first, then the task's) |
+| **Compose / combine** | sandbox `deny_*` (incl. `deny_unix`) compose — a task can't turn off a template's restriction; `allow_*` (incl. `allow_unix`), `pass_through_env`, and `tags` combine (template's entries first, then the task's) |
 | **Not accepted on templates** | `hide`, `interactive`, `quiet`, `raw`, `raw_args` (warn as unknown — set per task); `extends` (no chaining); **`secrets` is a config error** |
 
 Templates from every loaded config (global and parent included) form **one namespace** — the highest-precedence definition of a name wins.
@@ -381,7 +418,7 @@ mise secrets ls [-J] [--no-header]          # KEY, ENV, FILE, SCOPES, TASKS, DES
 
 - **Not inherited:** dependencies, `depends_post` tasks, `run = [{ task }]` children, hooks, `skip_if`, `mise env`, the activated shell, shims, and daemons never see them. For `mise run --secrets`, only the tasks named on the command line get them.
 - **`{{ secrets.NAME }}`** is allowed **only** in a task's own `env` (incl. a file task's `#MISE env=` header) — rejected in `run`, `[env]`, `[vars]`, and elsewhere. No filters/other variables; with `env_shell_expand` on, a `$` in the literal text is an error.
-- **Restrictions:** tasks that list secrets always need **trust**; can't come from remote, global, or system config; are refused when launched from hooks, `watch_files`, daemons, or bootstrap; **skip the artifact cache**; always have **redacted output** (`--raw` ignored unless the task sets `raw`/`interactive`). `secrets` is not allowed in `[task_templates]` or `[monorepo.task_defaults]`. **Personal keys are refused (2026.10.23):** a key from fnox's global config (`~/.config/fnox/config.toml`, where `fnox set --global` writes) or a `fnox.toml` in/above `$HOME` — or a project secret whose value interpolates one — belongs to you, so naming it in a task's `secrets` or `{{ secrets.NAME }}` is an error (`X comes from your own fnox config`); `--secrets-all` omits these keys, while an explicit `mise run --secrets NAME` / `mise x --secrets NAME` still passes them. `mise secrets ls` and `mise tasks validate` report them as kind `personal` (needs an fnox that reports key origin). A key mise also sets for the task (via `[env]`, task `env`, a tool, or a setting) is an error; a key the task's sandbox would drop is an error (add it to `allow_env`). File tasks use `#MISE secrets=[…]`. Refused in safe mode.
+- **Restrictions:** tasks that list secrets always need **trust**; can't come from **remote** task sources; are refused when launched from hooks, `watch_files`, daemons, or bootstrap; **skip the artifact cache**; always have **redacted output** (`--raw` ignored unless the task sets `raw`/`interactive`). `secrets` is not allowed in `[task_templates]` or `[monorepo.task_defaults]`. **Your own keys and global tasks work (2026.11.12):** a task may list keys from your personal fnox config (`~/.config/fnox/config.toml`, where `fnox set --global` writes, or a `fnox.toml` in/above `$HOME`), and tasks defined in your global or system mise config may list secrets — both used to be refused. `--secrets-all` still leaves personal keys out unless the task names them. `mise secrets ls --json` / `mise tasks validate` no longer report kinds `personal` or `not_project_config`. A key mise also sets for the task (via `[env]`, task `env`, a tool, or a setting) is an error; a key the task's sandbox would drop is an error (add it to `allow_env`). File tasks use `#MISE secrets=[…]`. Refused in safe mode.
 - `[secrets.fnox]` merges per field (nearest project file wins, so `mise.<env>.toml` can switch `profile`); it is **ignored** in global/system config and files in or above `$HOME` (`mise doctor` reports it). In CI or without a TTY mise runs `fnox --non-interactive --no-daemon`; it reads a running fnox daemon's cache but never starts one. `mise x` can't grant file (`as_file`) secrets and its output is never redacted.
 - **Migration:** the `mise-env-fnox` plugin and `_.fnox-env` directive are deprecated (`mise doctor` flags them) — move to `[secrets.fnox]` + per-task `secrets`. Check config with `mise tasks validate`.
 - 🔴 **`mise secrets` is now a built-in command** — a task named `secrets` must be run as `mise run secrets`. Likewise `installs` (10.4), `vars` (10.6), and `lsp` (10.18).
@@ -393,6 +430,7 @@ mise secrets ls [-J] [--no-header]          # KEY, ENV, FILE, SCOPES, TASKS, DES
 |---------|------|---------|---------|-------------|
 | `task.output` | string | unset (→ `prefix` if jobs>1, else `interleave`) | `MISE_TASK_OUTPUT` | prefix, interleave, keep-order, replacing, summary, timed, quiet (deprecated), silent |
 | `task.lock_timeout` | duration | unset (wait forever) | `MISE_TASK_LOCK_TIMEOUT` | How long a task waits for its [`lock`](#task-locks-lock) before failing (2026.11.0) |
+| `task.lock_pools` | table (name → whole-number string) | unset (each name has 1 slot) | `MISE_TASK_LOCK_POOLS` (`cpu=8,gpu=1` or JSON) | Slots per lock name, set once per machine in global config — see [Lock Pools](#lock-pools-tasklock_pools) (2026.11.9) |
 | `task.history` | bool | `true` | `MISE_TASK_HISTORY` | Record each run for `mise tasks history` (2026.11.3) |
 | `task.history_limit` | int | `20` | `MISE_TASK_HISTORY_LIMIT` | Runs kept per task; `0` stops recording |
 | `task.logs` | bool | `false` | `MISE_TASK_LOGS` | Keep each task's last output for `mise tasks log` (2026.11.3) |

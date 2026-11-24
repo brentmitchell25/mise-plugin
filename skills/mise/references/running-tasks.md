@@ -22,6 +22,8 @@
 | `mise run <task>` / `mise r <task>` | Execute task |
 | `mise <task>` | Shorthand (discouraged in scripts — future mise versions may add conflicting commands) |
 | `mise run` (no args) | Runs the `default` task; with no `default`, opens the interactive task selector (TTY only) |
+| `mise run --multi` | **2026.11.6.** Task picker as a **checklist**: Space checks, `/` filters, Enter runs the checked tasks as if joined with `:::`. Add `--all` to list every monorepo project's tasks. Needs a TTY; can't combine with a task name, `--affected`, or `--tag` |
+| `mise run --global` / `--no-global` | **2026.11.13.** Open the picker with **only** global tasks (global config, `~/.config/mise/tasks`) or **without** them — even when a `default` task exists. Combine with `--all` or `--multi` |
 | `mise tasks` / `mise tasks ls` / `mise tasks list` | List all tasks (`-J/--json`, `-x/--extended`, `--no-header`); `list` alias since 2026.10.18. `mise tasks run` still works but is hidden from help (2026.10.5) |
 | `mise tasks --hidden` | Include hidden tasks |
 | `mise tasks ls --tag <TAG>` | Only tasks with any of the given tags (repeatable; 2026.11.2) |
@@ -35,7 +37,7 @@
 | `mise tasks deps --compact` | Expand each shared subtree once, mark repeats `(already shown)` (2026.7.18+) |
 | `mise tasks deps --dot` | DOT format for Graphviz |
 | `mise tasks graph [--explain] [--json]` | Inspect the workspace project graph (Cargo/uv/Go/Gradle/Node) — **not experimental since 2026.10.6**; needs `monorepo_root = true` |
-| `mise tasks info <task> [-J]` | Show task details (JSON output includes `config_sources`) |
+| `mise tasks info <task> [-J]` | Show task details (JSON output includes `config_sources`, plus `history` — `null` for a task that never ran — since 2026.11.7, and `cache`, `lock`, `skip_if` since 2026.11.9; `mise tasks ls --json` carries the same fields) |
 | `mise tasks add <name> -- <cmd>` | Create task via CLI: `-a/--alias`, `-d/--depends`, `--depends-post`, `-w/--wait-for`, `-D/--dir`, `-f/--file` (file task), `-H/--hide`, `-q/--quiet`, `--silent`, `-r/--raw`, `-s/--sources`, `--outputs`, `--description`, `--run-windows` (ignored with `--file`), `--shell`; since **2026.10.25** also `--env-var KEY=VALUE` and `--tools TOOL@VER` (repeatable; no version ⇒ `latest`), `--usage <SPEC>` (with `--file`, written as one `#USAGE` line per spec line), `--confirm <MSG>`, `-F/--force`, `-n/--dry-run`, `-J/--json`, and target flags `-e/--env <ENV>` (`--env local` → `mise.local.toml`; `-e ci` writes `mise.ci.toml`, loaded only with `MISE_ENV=ci`), `-g/--global`, `-p/--path` (`--file` can't combine with them). Args after `--` are shell-quoted into one `run` string, so pass the command as separate words — `-- 'echo hi'` is stored as the single quoted word `'echo hi'` and fails with `command not found`. Re-adding an identical task is a no-op; replacing a **different** task without `--force` is deprecated (warns from 2027.5.0, refused from 2028.5.0). Trusts the written file's config root (not in safe mode) |
 | `mise tasks set <task> [flags] [-- <cmd>]` | **2026.10.25.** Change only the given fields of a TOML task, keeping the rest of the file (comments too). Takes the `tasks add` field flags; list flags (`--depends`, `--sources`, …) replace the whole list; `--env-var`/`--tools` add or replace single entries; `-u/--unset <FIELD>` (repeatable) removes a field; a command after `--` replaces `run`. Without `-e`/`-g`/`-p` it edits the one loaded file that defines the task and fails when several do. File tasks are refused (use `mise tasks edit`). `-n/--dry-run`, `-J/--json` |
 | `mise tasks rm <task>…` / `mise tasks remove` | **2026.10.25.** Remove a TOML task's table or delete a file task's script. Asks first — pass `--yes` without a terminal (a piped `y` isn't accepted). Same `-e`/`-g`/`-p`, `-n`, `-J` flags (`--json` prints an array). Refuses tasks from `task_config.includes` files or package.json; dependents are left as is (`mise tasks validate` reports them). A task named `set`, `rm`, or `remove` is now reachable only through `mise run <name>` |
@@ -92,10 +94,16 @@
 | `--deny-net` | Block all network access |
 | `--deny-read` | Block filesystem reads |
 | `--deny-write` | Block filesystem writes (except implicitly writable system paths such as the temp dir) |
+| `--deny-unix` | **2026.11.9.** Block Unix-socket connections outside the sandbox — **Linux 7.1+ only** (not implied by `--deny-all`) |
+| `--allow-unix <PATH>` | **2026.11.9.** Allow one socket, or every socket under a directory (implies `--deny-unix`); Linux 7.1+ only — see [Unix Sockets](sandboxing.md#unix-sockets-deny_unix--allow_unix) |
 
 > `--allow-net <HOST>` per-host filtering is unsupported on **Linux and macOS** (both error; macOS since 2026.10.5); on Windows sandboxing is unavailable (warns and runs unfiltered).
 
-> **mise's own flags must precede the task name:** `mise run --silent build`, not `mise run build --silent`. Extra args after the task go to the **last** command.
+> **mise's own flags must precede the task name:** `mise run --silent build`, not `mise run build --silent`. Extra args after the task go to the **last** command. `mise run <task> -h` asks the task's usage spec whether `-h` means help (2026.11.7), so a task whose spec sets `disable_help_flag #true`, declares its own `-h` flag, or accepts `-h` as a flag value receives it as an argument (with `disable_help_flag`, `--help` too — verified on 2026.11.13).
+>
+> **Completion (2026.11.10):** in a monorepo, `mise run <TAB>` suggests only the **shortest** name per task; type `:` or `//` to see the qualified forms.
+>
+> **Quiet runs hide daemon startup** (2026.11.7): `--quiet`/`--silent` also suppress the log lines of [daemons](daemons.md#tasks-that-require-daemons) a task starts.
 
 > **Breaking change (2026.7.6):** `--quiet` / `quiet = true` / `MISE_QUIET=1` **no longer collapse task output** to un-prefixed interleave — they preserve the resolved style. Use `--output quiet` or `-o interleave` for the old behavior.
 
@@ -200,6 +208,8 @@ mise tasks log test --path      # print the log file path (even if none exists y
 Wrapper around `watchexec` (install separately: `mise use -g watchexec@latest`). By default watches the `sources` of the task **and its dependencies**; a task with no sources watches the cwd; `mise watch` with no task runs `default`.
 
 > 🔴 **2026.10.5:** watchexec flags were previously parsed but **silently dropped** — they are now forwarded (`--shell`, `--notify`, `--color`, `--timings`, `--bell`, `--fs-events`, `--filter-file`, `--emit-events-to`, `--manual`, `--only-emit-events`, `--project-origin`, `--map-signal`, `--stdin-quit`, `--no-meta`, `--ignore-file`, `--no-{project,global,default,discover}-ignore`, `--ignore-nothing`). watchexec's own `-E/--env` and `-q/--quiet` are renamed **`--watchexec-env KEY=VALUE`** and **`--watchexec-quiet`** (so `-E`/`-q` stay mise's `--env`/`--quiet`). `--workdir` is hidden and has no effect.
+
+Tasks separated by `:::` (`mise watch a ::: b`) share **one** watcher and one `mise run`: a change matching any of their sources re-runs all of them (each still up-to-date-checked), and `--restart` restarts them together. Use a separate `mise watch` per task to restart them independently.
 
 | Flag | Short | Description |
 |------|-------|-------------|

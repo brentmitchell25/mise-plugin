@@ -127,6 +127,8 @@ task.auto_infer = ["node"]   # no longer needs experimental (2026.10.6)
 ```
 Task ID `node:@acme/web#build`, with the monorepo path `//apps/web:build` as an alias. Runs in the package directory through the detected workspace package manager (`pnpm-workspace.yaml` → `packageManager` → lockfile bun/pnpm/yarn/npm → npm) as `<pm> run <script> --`, with raw arg passthrough. An explicit mise task at that path **replaces** the imported one, and both names resolve to it. A `<package>#<task>` entry in `turbo.json` beats a plain `<task>` entry. The Node provider also imports `inputs`, `outputs`, `cache`, and `dependsOn` from matching **`turbo.json`** entries (tracking `turbo.json` as a task-definition source); Turbo expressions mise can't preserve (e.g. `$TURBO_ROOT$`) are left unset. mise never guesses outputs or cacheability from a command string.
 
+A **root** `package.json` with a `name` is a project in the workspace graph for every package manager — npm and Bun too, not only pnpm/Yarn (2026.11.8); its scripts run as `<manager> run <script> --`. With `--affected`, a change to a root lockfile marks **every** Node workspace project affected.
+
 **Root task defaults** (applied by task name to inferred and explicit workspace tasks):
 ```toml
 [monorepo.task_defaults.build]
